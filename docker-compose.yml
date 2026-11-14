@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      FF_OWNER_PASSWORD: ${FF_OWNER_PASSWORD}
+      FF_APP_PASSWORD: ${FF_APP_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d freightflow"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      FF_DATABASE_URL: postgresql+psycopg://freightflow_app:${FF_APP_PASSWORD}@db/freightflow
+      FF_MIGRATION_DATABASE_URL: postgresql+psycopg://freightflow_owner:${FF_OWNER_PASSWORD}@db/freightflow
+      FF_JWT_SECRET: ${FF_JWT_SECRET}
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
