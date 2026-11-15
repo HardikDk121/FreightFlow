@@ -17,6 +17,8 @@ abstract final class Palette {
   static const link = Color(0xFF0066CC);
   static const error = Color(0xFFB3261E);
   static const errorContainer = Color(0xFFFCE8E6);
+  static const warning = Color(0xFF7A4D00);
+  static const warningContainer = Color(0xFFFFF1CC);
   static const success = Color(0xFF1B6E35);
   static const successContainer = Color(0xFFE3F4E7);
 }

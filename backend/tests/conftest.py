@@ -15,7 +15,7 @@ from sqlalchemy import create_engine, text
 from app.main import app
 
 owner_engine = create_engine(os.environ["FF_MIGRATION_DATABASE_URL"])
-TABLES = "audit_log, truck, item_type, party, user_invite, auth_token, app_user, company"
+TABLES = "dispatch_line, trip, lr, lr_settings, audit_log, truck, item_type, party, user_invite, auth_token, app_user, company"
 
 
 @pytest.fixture(scope="session", autouse=True)

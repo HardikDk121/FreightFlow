@@ -36,6 +36,12 @@ class User {
   bool get isAdmin => role == 'admin';
 
   bool get canEditMasterData => role == 'admin' || role == 'manager';
+
+  bool get canBookLr => role == 'admin' || role == 'manager' || role == 'clerk';
+
+  bool get canCancelLr => role == 'admin' || role == 'manager';
+
+  bool get canDispatch => role == 'admin' || role == 'manager' || role == 'dispatcher';
 }
 
 /// Who is signed in. The root widget switches between the auth screens and the app on [status].

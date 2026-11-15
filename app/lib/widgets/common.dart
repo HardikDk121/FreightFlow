@@ -135,11 +135,17 @@ class AppTextField extends StatelessWidget {
     this.obscure = false,
     this.keyboardType,
     this.capitalization = TextCapitalization.none,
+    this.highlighted = false,
+    this.onChanged,
   });
 
   final String label;
   final TextEditingController controller;
   final bool mandatory;
+
+  /// Filled in by the app rather than typed: shown in amber until the person edits it.
+  final bool highlighted;
+  final ValueChanged<String>? onChanged;
   final int? minLength;
 
   /// Extra validation for a non-empty value. Returns an error message or null.
@@ -170,10 +176,26 @@ class AppTextField extends StatelessWidget {
               textCapitalization: capitalization,
               style: Theme.of(context).textTheme.bodyLarge,
               validator: _validate,
+              onChanged: onChanged,
+              decoration: highlighted ? _highlightDecoration(context) : const InputDecoration(),
             ),
           ],
         ),
       );
+}
+
+InputDecoration _highlightDecoration(BuildContext context) {
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(12),
+    borderSide: const BorderSide(color: Palette.warning),
+  );
+  return InputDecoration(
+    fillColor: Palette.warningContainer,
+    enabledBorder: border,
+    suffixIcon: const Icon(Icons.warning_amber_rounded, color: Palette.warning),
+    helperText: 'Filled in for you. Check it.',
+    helperStyle: Theme.of(context).textTheme.bodySmall!.copyWith(color: Palette.warning),
+  );
 }
 
 /// A labelled row of pill choices; exactly one is selected.
@@ -184,12 +206,16 @@ class ChoiceField<T> extends StatelessWidget {
     required this.options,
     required this.value,
     required this.onChanged,
+    this.highlighted = false,
   });
 
   final String label;
   final Map<T, String> options;
   final T value;
   final ValueChanged<T> onChanged;
+
+  /// Chosen by the app rather than the person: says so until the person picks.
+  final bool highlighted;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -215,6 +241,13 @@ class ChoiceField<T> extends StatelessWidget {
                   ),
               ],
             ),
+            if (highlighted) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Filled in for you. Check it.',
+                style: Theme.of(context).textTheme.bodySmall!.copyWith(color: Palette.warning),
+              ),
+            ],
           ],
         ),
       );

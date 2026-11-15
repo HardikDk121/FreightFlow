@@ -5,7 +5,9 @@ import '../../api/api_client.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
-import '../team/users_screen.dart' show roleLabels;
+import '../masterdata/master_data_screen.dart';
+import '../team/users_screen.dart';
+import 'lr_settings_screen.dart';
 
 const _languages = {'en': 'English', 'hi': 'हिन्दी', 'gu': 'ગુજરાતી'};
 
@@ -64,9 +66,15 @@ class AccountScreen extends StatelessWidget {
                 tile(Icons.badge_outlined, 'Edit profile', () => open(ProfileScreen(user: user))),
                 const Divider(indent: 16, endIndent: 16),
                 tile(Icons.lock_outline, 'Change password', () => open(const ChangePasswordScreen())),
+                const Divider(indent: 16, endIndent: 16),
+                tile(Icons.inventory_2_outlined, 'Master data', () => open(const MasterDataScreen())),
                 if (user.isAdmin) ...[
                   const Divider(indent: 16, endIndent: 16),
+                  tile(Icons.group_outlined, 'Team', () => open(const UsersScreen())),
+                  const Divider(indent: 16, endIndent: 16),
                   tile(Icons.apartment_outlined, 'Company settings', () => open(const CompanyScreen())),
+                  const Divider(indent: 16, endIndent: 16),
+                  tile(Icons.receipt_long_outlined, 'LR settings', () => open(const LrSettingsScreen())),
                 ],
               ],
             ),

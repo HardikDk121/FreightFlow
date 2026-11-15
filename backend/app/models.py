@@ -1,8 +1,9 @@
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Numeric, Text, func
+from sqlalchemy import BigInteger, Boolean, Computed, Date, DateTime, Enum, ForeignKey, Integer, Numeric, Text, func
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -165,3 +166,89 @@ class AuditLog(Base):
     entity_id: Mapped[str] = mapped_column(Text, nullable=False)
     detail: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = _created_at()
+
+
+class LrSettings(Base):
+    """One row per company: the LR number series and the values a new LR starts with."""
+
+    __tablename__ = "lr_settings"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("company.id"), primary_key=True)
+    prefix: Mapped[str] = mapped_column(Text, nullable=False, default="LR")
+    next_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    from_city: Mapped[str | None] = mapped_column(Text)
+    default_st_charges: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal("0"))
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class Lr(Base):
+    """A printed LR. Values are a snapshot of what was printed; editing a party later does not change them."""
+
+    __tablename__ = "lr"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    prefix: Mapped[str] = mapped_column(Text, nullable=False)
+    series_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    lr_number: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="confirmed")
+    lr_date: Mapped[date] = mapped_column(Date, nullable=False)
+    from_city: Mapped[str] = mapped_column(Text, nullable=False)
+    to_city: Mapped[str] = mapped_column(Text, nullable=False)
+    freight_by: Mapped[str] = mapped_column(Text, nullable=False)
+    consignor_name: Mapped[str] = mapped_column(Text, nullable=False)
+    consignor_gstin: Mapped[str | None] = mapped_column(Text)
+    consignee_name: Mapped[str] = mapped_column(Text, nullable=False)
+    consignee_gstin: Mapped[str | None] = mapped_column(Text)
+    goods_description: Mapped[str] = mapped_column(Text, nullable=False)
+    packages: Mapped[int] = mapped_column(Integer, nullable=False)
+    weight: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    charged_weight: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    rate: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    freight: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    hamali: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    other_charges: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    st_charges: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    total: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), Computed("freight + hamali + other_charges + st_charges", persisted=True)
+    )
+    value: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    eway_bill_no: Mapped[str | None] = mapped_column(Text)
+    # What one package is, when known. Gives the load planner its size and weight.
+    item_type_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("item_type.id"))
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+    cancelled_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class Trip(Base):
+    """One truck sent out with a set of LRs. Created at dispatch; completed when every line is delivered."""
+
+    __tablename__ = "trip"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    truck_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("truck.id"), nullable=False)
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    driver_name: Mapped[str | None] = mapped_column(Text)
+    driver_phone: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="dispatched")
+    dispatched_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    dispatched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DispatchLine(Base):
+    """Packages of one LR loaded on one trip. An LR split across trucks has one line per trip."""
+
+    __tablename__ = "dispatch_line"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    trip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trip.id"), nullable=False)
+    lr_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lr.id"), nullable=False)
+    packages: Mapped[int] = mapped_column(Integer, nullable=False)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))

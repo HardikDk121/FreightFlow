@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /srv
+# Tesseract reads the text on invoice photos.
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml alembic.ini ./
 COPY app app
 COPY migrations migrations
