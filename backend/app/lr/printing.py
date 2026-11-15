@@ -38,7 +38,7 @@ def format_fields(lr: LrPrintData) -> dict[str, str]:
         "lr_date": lr.lr_date.strftime("%d-%m-%Y"),
         "from_city": lr.from_city.upper(),
         "to_city": lr.to_city.upper(),
-        "freight_by": lr.freight_by.value,
+        "freight_by": lr.freight_by,
         "consignor_name": lr.consignor_name.upper(),
         "consignor_gstin": lr.consignor_gstin or "",
         "consignee_name": lr.consignee_name.upper(),

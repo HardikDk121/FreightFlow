@@ -5,12 +5,12 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.validators import Gstin, PatchModel
 
 Amount = Annotated[Decimal, Field(ge=0, le=Decimal("99999999.99"), decimal_places=2)]
-Weight = Annotated[Decimal, Field(ge=0, le=Decimal("999999.99"), decimal_places=2)]
+PositiveWeight = Annotated[Decimal, Field(gt=0, le=Decimal("999999.99"), decimal_places=2)]
 
 
 def _prefix(value: str) -> str:
@@ -48,8 +48,8 @@ class LrFields(BaseModel):
     consignee_gstin: Gstin | None = None
     goods_description: _text(50)
     packages: int = Field(gt=0, le=99999)
-    weight: Weight | None = None
-    charged_weight: Weight | None = None
+    weight: PositiveWeight
+    charged_weight: PositiveWeight | None = None
     rate: Amount = Decimal("0")
     freight: Amount = Decimal("0")
     hamali: Amount = Decimal("0")
@@ -59,17 +59,55 @@ class LrFields(BaseModel):
     eway_bill_no: Annotated[str, StringConstraints(pattern=r"^[0-9]{12}$")] | None = None
     item_type_id: uuid.UUID | None = None
 
+    @model_validator(mode="after")
+    def _check_consistency(self) -> "LrFields":
+        if self.from_city.lower() == self.to_city.lower():
+            raise ValueError("From and To cannot be the same city.")
+        if self.charged_weight is not None and self.charged_weight < self.weight:
+            raise ValueError("Charged weight cannot be less than the actual weight.")
+        if self.consignor_gstin and self.consignor_gstin == self.consignee_gstin:
+            raise ValueError("Consignor and consignee cannot have the same GST number.")
+        return self
 
-class LrPrintData(LrFields):
-    """Everything printed on the LR."""
+
+class LrPreview(LrFields):
+    """An unsaved LR to draw as a PDF, with the number to show on it."""
 
     lr_number: _text(20)
+
+
+class LrPrintData(BaseModel):
+    """Everything printed on the LR. No input rules here: it also carries LRs saved before a rule existed."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    lr_number: str
+    lr_date: dt.date
+    from_city: str
+    to_city: str
+    freight_by: str
+    consignor_name: str
+    consignor_gstin: str | None
+    consignee_name: str
+    consignee_gstin: str | None
+    goods_description: str
+    packages: int
+    weight: Decimal | None
+    charged_weight: Decimal | None
+    rate: Decimal
+    freight: Decimal
+    hamali: Decimal
+    other_charges: Decimal
+    st_charges: Decimal
+    value: Decimal | None
+    eway_bill_no: str | None
 
 
 class LrRead(LrPrintData):
     id: uuid.UUID
     status: str
     total: Decimal
+    item_type_id: uuid.UUID | None
     created_at: dt.datetime
     cancelled_at: dt.datetime | None
     cancel_reason: str | None

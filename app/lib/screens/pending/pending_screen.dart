@@ -116,19 +116,29 @@ class _PendingDestinationScreenState extends State<PendingDestinationScreen> {
                   final days = lr['days_waiting'] as int;
                   final late = days > 3;
                   return AppCard(
-                    child: ListTile(
-                      minVerticalPadding: 16,
-                      isThreeLine: true,
-                      title: Text('${lr['lr_number']} · ${lr['consignee_name']}', style: text.titleMedium),
-                      subtitle: Text(
-                        '${lr['pending']} of ${lr['packages']} packages · ${lr['goods_description']}\n'
-                        'from ${lr['consignor_name']}',
-                        style: text.bodyMedium,
-                      ),
-                      trailing: StatusChip(
-                        waitingLabel(days),
-                        background: late ? Palette.warningContainer : Palette.primaryContainer,
-                        foreground: late ? Palette.warning : Palette.onPrimaryContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(child: Text(lr['lr_number'] as String, style: text.titleMedium)),
+                              StatusChip(
+                                waitingLabel(days),
+                                background: late ? Palette.warningContainer : Palette.primaryContainer,
+                                foreground: late ? Palette.warning : Palette.onPrimaryContainer,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text('${lr['consignor_name']} → ${lr['consignee_name']}', style: text.bodyMedium),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${lr['pending']} of ${lr['packages']} packages waiting · ${lr['goods_description']}',
+                            style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted),
+                          ),
+                        ],
                       ),
                     ),
                   );

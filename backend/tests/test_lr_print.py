@@ -49,7 +49,7 @@ def test_total_is_the_sum_of_the_charges(client, admin):
 
 
 def test_optional_values_are_left_blank(client, admin):
-    body = {k: v for k, v in SAMPLE.items() if k not in ("consignee_gstin", "weight", "value", "eway_bill_no")}
+    body = {k: v for k, v in SAMPLE.items() if k not in ("consignee_gstin", "value", "eway_bill_no")}
     response = client.post("/lrs/print-preview", json=body, headers=bearer(admin))
     assert response.status_code == 200
     assert "622194022693" not in _text(response.content)
@@ -68,6 +68,11 @@ def test_bad_values_are_rejected(client, admin):
         {"freight": "-1"},
         {"eway_bill_no": "12345"},
         {"consignor_name": "W" * 61},
+        {"weight": "0"},
+        {"weight": None},
+        {"to_city": "rajkot"},
+        {"charged_weight": "50"},
+        {"consignee_gstin": SAMPLE["consignor_gstin"]},
     ):
         assert client.post("/lrs/print-preview", json={**SAMPLE, **bad}, headers=bearer(admin)).status_code == 422, bad
 

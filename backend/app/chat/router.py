@@ -13,4 +13,4 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 @router.post("", response_model=ChatResponse)
 def ask(body: ChatRequest, user: User = Depends(current_user), session: Session = Depends(get_session)) -> ChatResponse:
     """Answer a question from the fixed list of read-only tools. Every question is written to the audit log."""
-    return service.ask(session, user, body.message)
+    return service.ask(session, user, body.message, body.context_lr_number)

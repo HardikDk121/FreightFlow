@@ -105,7 +105,7 @@ class ErrorBanner extends StatelessWidget {
       );
 }
 
-/// 28dp pill with a word in it. Colour never carries the meaning alone.
+/// Pill with a word in it, sized to its text. Colour never carries the meaning alone.
 class StatusChip extends StatelessWidget {
   const StatusChip(this.label, {super.key, required this.background, required this.foreground});
 
@@ -115,11 +115,38 @@ class StatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        height: 28,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(14)),
-        child: Text(label, style: Theme.of(context).textTheme.labelMedium!.copyWith(color: foreground)),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(999)),
+        child: Text(
+          label,
+          maxLines: 1,
+          style: Theme.of(context).textTheme.labelMedium!.copyWith(color: foreground),
+        ),
+      );
+}
+
+/// Section title with a small tinted icon, used to break long forms and screens into parts.
+class SectionHeader extends StatelessWidget {
+  const SectionHeader(this.title, {super.key, required this.icon});
+
+  final String title;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 12, bottom: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(color: Palette.primaryContainer, borderRadius: BorderRadius.circular(10)),
+              child: Icon(icon, size: 18, color: Palette.onPrimaryContainer),
+            ),
+            const SizedBox(width: 12),
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+          ],
+        ),
       );
 }
 
@@ -137,11 +164,19 @@ class AppTextField extends StatelessWidget {
     this.capitalization = TextCapitalization.none,
     this.highlighted = false,
     this.onChanged,
+    this.unit,
+    this.helper,
   });
 
   final String label;
   final TextEditingController controller;
   final bool mandatory;
+
+  /// Shown at the right edge of the field: "kg", "Rs".
+  final String? unit;
+
+  /// A neutral line under the field, such as how a calculated value was worked out.
+  final String? helper;
 
   /// Filled in by the app rather than typed: shown in amber until the person edits it.
   final bool highlighted;
@@ -176,8 +211,14 @@ class AppTextField extends StatelessWidget {
               textCapitalization: capitalization,
               style: Theme.of(context).textTheme.bodyLarge,
               validator: _validate,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               onChanged: onChanged,
-              decoration: highlighted ? _highlightDecoration(context) : const InputDecoration(),
+              decoration: (highlighted ? _highlightDecoration(context) : const InputDecoration()).copyWith(
+                suffixText: unit,
+                helperText: highlighted ? null : helper,
+                helperMaxLines: 2,
+                errorMaxLines: 2,
+              ),
             ),
           ],
         ),
@@ -232,9 +273,13 @@ class ChoiceField<T> extends StatelessWidget {
                 for (final option in options.entries)
                   ChoiceChip(
                     label: Text(option.value),
+                    labelStyle: Theme.of(context).textTheme.labelMedium!.copyWith(
+                          color: option.key == value ? Palette.onPrimaryContainer : Palette.onSurface,
+                        ),
                     selected: option.key == value,
                     showCheckmark: false,
-                    shape: const StadiumBorder(side: BorderSide(color: Palette.outline)),
+                    side: BorderSide(color: option.key == value ? Palette.primary : Palette.outline),
+                    shape: const StadiumBorder(),
                     backgroundColor: Palette.surface,
                     selectedColor: Palette.primaryContainer,
                     onSelected: (_) => onChanged(option.key),
@@ -282,7 +327,10 @@ mixin Submitter<T extends StatefulWidget> on State<T> {
   String? error;
 
   Future<void> submit(Future<void> Function() action) async {
-    if (!formKey.currentState!.validate()) return;
+    if (!formKey.currentState!.validate()) {
+      setState(() => error = 'Some fields need fixing. Look for the red messages.');
+      return;
+    }
     setState(() {
       busy = true;
       error = null;
@@ -297,7 +345,34 @@ mixin Submitter<T extends StatefulWidget> on State<T> {
   }
 }
 
-/// Scaffold for a [Submitter] screen: app bar, fields, error banner, one primary button.
+/// White bar pinned to the bottom of a screen, for its main action.
+class BottomBar extends StatelessWidget {
+  const BottomBar({super.key, required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Palette.surface,
+        child: DecoratedBox(
+          decoration: const BoxDecoration(border: Border(top: BorderSide(color: Palette.outline))),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: children,
+              ),
+            ),
+          ),
+        ),
+      );
+}
+
+/// Scaffold for a [Submitter] screen: app bar, scrolling fields, and a pinned bar holding the
+/// error (if any), an optional [footer] such as a running total, and the one primary button.
 class FormPage extends StatelessWidget {
   const FormPage({
     super.key,
@@ -308,6 +383,7 @@ class FormPage extends StatelessWidget {
     required this.onSubmit,
     required this.busy,
     required this.error,
+    this.footer,
   });
 
   final String title;
@@ -317,28 +393,26 @@ class FormPage extends StatelessWidget {
   final VoidCallback onSubmit;
   final bool busy;
   final String? error;
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: Text(title)),
-        body: SafeArea(
-          child: Form(
-            key: formKey,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (error != null) ...[ErrorBanner(error!), const SizedBox(height: 16)],
-                ...children,
-                const SizedBox(height: 8),
-                FilledButton(
-                  onPressed: busy ? null : onSubmit,
-                  child: busy
-                      ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text(submitLabel),
-                ),
-              ],
+        body: Form(
+          key: formKey,
+          child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), children: children),
+        ),
+        bottomNavigationBar: BottomBar(
+          children: [
+            if (error != null) ...[ErrorBanner(error!), const SizedBox(height: 12)],
+            if (footer != null) ...[footer!, const SizedBox(height: 12)],
+            FilledButton(
+              onPressed: busy ? null : onSubmit,
+              child: busy
+                  ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text(submitLabel),
             ),
-          ),
+          ],
         ),
       );
 }

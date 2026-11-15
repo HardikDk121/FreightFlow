@@ -62,6 +62,8 @@ ThemeData _buildTheme() {
     onPrimaryContainer: Palette.onPrimaryContainer,
     secondary: Palette.link,
     onSecondary: Palette.onPrimary,
+    secondaryContainer: Palette.primaryContainer,
+    onSecondaryContainer: Palette.onPrimaryContainer,
     error: Palette.error,
     onError: Palette.onPrimary,
     errorContainer: Palette.errorContainer,
@@ -164,6 +166,11 @@ ThemeData _buildTheme() {
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       indicatorColor: Palette.primaryContainer,
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          color: states.contains(WidgetState.selected) ? Palette.primary : Palette.onSurfaceMuted,
+        ),
+      ),
       labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => text.labelMedium!.copyWith(
           color: states.contains(WidgetState.selected) ? Palette.primary : Palette.onSurfaceMuted,

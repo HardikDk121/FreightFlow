@@ -126,20 +126,51 @@ class _LrListScreenState extends State<LrListScreen> {
         itemBuilder: (_, i) {
           final lr = lrs[i];
           final cancelled = lr['status'] == 'cancelled';
+          final weight = lr['weight'] as String?;
           return AppCard(
-            child: ListTile(
-              minVerticalPadding: 16,
-              title: Text(lr['lr_number'] as String, style: text.titleMedium),
-              subtitle: Text(
-                '${lr['consignor_name']} → ${lr['consignee_name']}\n'
-                '${lr['to_city']} · ${lrDateLabel(lr['lr_date'] as String)}',
-                style: text.bodyMedium,
-              ),
-              isThreeLine: true,
-              trailing: cancelled
-                  ? const StatusChip('Cancelled', background: Palette.errorContainer, foreground: Palette.error)
-                  : null,
+            child: InkWell(
               onTap: () => _open(LrDetailScreen(lr: lr)),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(child: Text(lr['lr_number'] as String, style: text.titleMedium)),
+                        cancelled
+                            ? const StatusChip(
+                                'Cancelled',
+                                background: Palette.errorContainer,
+                                foreground: Palette.error,
+                              )
+                            : StatusChip(
+                                'Rs ${lr['total']}',
+                                background: Palette.primaryContainer,
+                                foreground: Palette.onPrimaryContainer,
+                              ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${(lr['from_city'] as String).toUpperCase()} → ${(lr['to_city'] as String).toUpperCase()}',
+                      style: text.labelMedium,
+                    ),
+                    const SizedBox(height: 4),
+                    Text('${lr['consignor_name']} → ${lr['consignee_name']}', style: text.bodyMedium),
+                    const SizedBox(height: 8),
+                    Text(
+                      [
+                        '${lr['packages']} packages',
+                        if (weight != null) '${double.parse(weight).toStringAsFixed(0)} kg',
+                        lr['freight_by'] as String,
+                        lrDateLabel(lr['lr_date'] as String),
+                      ].join(' · '),
+                      style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted),
+                    ),
+                  ],
+                ),
+              ),
             ),
           );
         },

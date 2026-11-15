@@ -22,7 +22,7 @@ The rest of this file covers the backend.
 | Invoice scan | `POST /invoices/scan` (photo upload): reads consignor, consignee, GST numbers, city, goods, value and e-way bill number. Nothing is saved and the photo is not kept. |
 | Pending | `GET /pending` (by destination), `GET /pending/lrs?destination=&older_than_days=` (oldest first) |
 | Trips | `POST /trips/plan` (load suggestion), `POST /trips` (dispatch, partial loads allowed), `GET /trips`, `GET /trips/{id}`, `POST /trips/{id}/lines/{line_id}/deliver` |
-| Chat | `POST /chat`: answers from five read-only tools; refuses anything that would change data; every question is audited |
+| Chat | `POST /chat`: answers from nine read-only tools (LR details, pending, bookings by day, trucks, party search); understands typos, everyday words and follow-up questions; refuses anything that would change data; every question is audited |
 | Dashboard | `GET /dashboard` |
 | Ops | `GET /health` |
 
@@ -67,7 +67,7 @@ the running backend.
   dispatch locks the LR rows while it checks, so the same packages cannot be loaded twice.
 - **The load planner is a pure function** in `app/planner/planner.py`. Version 1 checks space and weight
   with 85% of the truck body counted as usable; it does not place boxes in 3D.
-- **Chat** picks a tool with keyword rules in `app/chat/interpreter.py` (English only). A language model
+- **Chat** picks a tool with word and pattern rules in `app/chat/interpreter.py` (English, with some Hindi words such as baki, aaj, kal). A language model
   can replace that one function without touching the tools, permissions or audit log.
 - **Adding a tenant table.** Add it to `TENANT_TABLES` in a new migration so it gets the policy and grants.
 

@@ -13,13 +13,14 @@ class _Message {
   final bool failed;
 }
 
-const _examples = [
-  'What is pending for Surat?',
-  'What came today?',
+const _starters = [
+  'What is pending?',
+  'What was booked today?',
   'Which goods have waited more than 3 days?',
+  'Which trucks are on the road?',
 ];
 
-/// Ask about pending goods, arrivals and LR status in plain words. The assistant only reads.
+/// Ask about LRs, pending goods, bookings and trucks in plain words. The assistant only reads.
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -31,6 +32,10 @@ class _ChatScreenState extends State<ChatScreen> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final List<_Message> _messages = [];
+  List<String> _suggestions = _starters;
+
+  /// The LR the conversation is about, so "and its weight?" needs no number.
+  String? _contextLr;
   bool _waiting = false;
 
   @override
@@ -40,37 +45,42 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  void _add(_Message message) {
-    setState(() => _messages.add(message));
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
+  void _scrollToEnd() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          _scroll.animateTo(
+            _scroll.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOut,
+          );
+        }
+      });
 
   Future<void> _send(String question) async {
     final text = question.trim();
     if (text.isEmpty || _waiting) return;
     _input.clear();
-    _add(_Message(text, mine: true));
-    setState(() => _waiting = true);
+    setState(() {
+      _messages.add(_Message(text, mine: true));
+      _waiting = true;
+    });
+    _scrollToEnd();
     try {
-      final reply = await context.read<ApiClient>().post('/chat', {'message': text}) as Map<String, dynamic>;
+      final reply = await context.read<ApiClient>().post('/chat', {
+        'message': text,
+        if (_contextLr != null) 'context_lr_number': _contextLr,
+      }) as Map<String, dynamic>;
       if (!mounted) return;
-      _add(_Message(
-        reply['answer'] as String,
-        mine: false,
-        lrNumbers: (reply['lr_numbers'] as List).cast<String>(),
-      ));
+      final lrNumbers = (reply['lr_numbers'] as List).cast<String>();
+      setState(() {
+        _messages.add(_Message(reply['answer'] as String, mine: false, lrNumbers: lrNumbers));
+        _suggestions = (reply['suggestions'] as List).cast<String>();
+        if (lrNumbers.length == 1) _contextLr = lrNumbers.single;
+      });
     } on ApiException catch (e) {
-      if (mounted) _add(_Message(e.message, mine: false, failed: true));
+      if (mounted) setState(() => _messages.add(_Message(e.message, mine: false, failed: true)));
     } finally {
       if (mounted) setState(() => _waiting = false);
+      _scrollToEnd();
     }
   }
 
@@ -79,23 +89,37 @@ class _ChatScreenState extends State<ChatScreen> {
     final color = message.failed
         ? Palette.errorContainer
         : message.mine
-            ? Palette.primaryContainer
+            ? Palette.primary
             : Palette.surface;
     return Align(
       alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(12),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.84),
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(12),
-          border: message.mine ? null : Border.all(color: Palette.outline),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(message.mine ? 18 : 4),
+            bottomRight: Radius.circular(message.mine ? 4 : 18),
+          ),
+          border: message.mine || message.failed ? null : Border.all(color: Palette.outline),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(message.text, style: text.bodyLarge),
+            SelectableText(
+              message.text,
+              style: text.bodyLarge!.copyWith(
+                color: message.mine
+                    ? Palette.onPrimary
+                    : message.failed
+                        ? Palette.error
+                        : Palette.onSurface,
+              ),
+            ),
             if (message.lrNumbers.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
@@ -109,6 +133,33 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  Widget _welcome() {
+    final text = Theme.of(context).textTheme;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 32, 16, 16),
+      children: [
+        Container(
+          width: 56,
+          height: 56,
+          alignment: Alignment.centerLeft,
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(color: Palette.primaryContainer, borderRadius: BorderRadius.circular(16)),
+            child: const Icon(Icons.chat_bubble_outline, color: Palette.onPrimaryContainer),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text('Ask about your goods', style: text.headlineMedium),
+        const SizedBox(height: 8),
+        Text(
+          'Try an LR number, a city, a day, or a truck number. I look things up; I never change anything.',
+          style: text.bodyLarge!.copyWith(color: Palette.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
@@ -119,26 +170,34 @@ class _ChatScreenState extends State<ChatScreen> {
           children: [
             Expanded(
               child: _messages.isEmpty
-                  ? ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        Text('Ask about your goods', style: text.titleMedium),
-                        const SizedBox(height: 4),
-                        Text('I can look things up. I cannot change anything.', style: text.bodyMedium),
-                        const SizedBox(height: 16),
-                        for (final example in _examples)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: OutlinedButton(onPressed: () => _send(example), child: Text(example)),
-                          ),
-                      ],
-                    )
+                  ? _welcome()
                   : ListView(
                       controller: _scroll,
                       padding: const EdgeInsets.all(16),
-                      children: [for (final m in _messages) _bubble(m)],
+                      children: [
+                        for (final m in _messages) _bubble(m),
+                        if (_waiting) _bubble(const _Message('Looking that up…', mine: false)),
+                      ],
                     ),
             ),
+            if (_suggestions.isNotEmpty && !_waiting)
+              SizedBox(
+                height: 44,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _suggestions.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) => ActionChip(
+                    label: Text(_suggestions[i]),
+                    labelStyle: text.labelMedium!.copyWith(color: Palette.link),
+                    backgroundColor: Palette.surface,
+                    side: const BorderSide(color: Palette.outline),
+                    shape: const StadiumBorder(),
+                    onPressed: () => _send(_suggestions[i]),
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Row(
@@ -148,16 +207,14 @@ class _ChatScreenState extends State<ChatScreen> {
                       controller: _input,
                       textInputAction: TextInputAction.send,
                       onSubmitted: _send,
-                      decoration: const InputDecoration(hintText: 'Type a question'),
+                      decoration: const InputDecoration(hintText: 'Ask about an LR, a city or a truck'),
                     ),
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
                     tooltip: 'Send',
                     onPressed: _waiting ? null : () => _send(_input.text),
-                    icon: _waiting
-                        ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.arrow_upward),
+                    icon: const Icon(Icons.arrow_upward),
                   ),
                 ],
               ),

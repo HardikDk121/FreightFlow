@@ -11,9 +11,20 @@ import '../../widgets/common.dart';
 import 'lr_page.dart';
 
 const _freightByOptions = {'ToPay': 'To pay', 'Paid': 'Paid', 'TBB': 'To be billed'};
+final _gstin = RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$');
 
-/// A new LR. Starts from the company defaults, picks up the consignor's last LR,
-/// and is only saved when the person confirms the printed preview. Pops with `true` once saved.
+/// 500.0 -> "500", 12.5 -> "12.50".
+String _plain(num value) => value == value.roundToDouble() ? value.toInt().toString() : value.toStringAsFixed(2);
+
+/// A new LR.
+///
+/// Three things fill fields without typing: the company defaults, a scanned invoice, and the
+/// consignor's last LR (all shown in amber until checked). Three values are calculated and
+/// follow their inputs until the person types over them:
+///   weight         = packages x unit weight of the package type
+///   charged weight = weight
+///   freight        = rate x charged weight
+/// Nothing is saved until the printed preview is confirmed. Pops with `true` once saved.
 class LrFormScreen extends StatefulWidget {
   const LrFormScreen({super.key});
 
@@ -41,8 +52,9 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   final _ewayBill = TextEditingController();
   DateTime _date = DateTime.now();
   String _freightBy = 'ToPay';
+  bool _freightByChosen = false;
 
-  /// What one package is, for the load planner. Null when not set.
+  /// What one package is. Gives the weight calculation and the load planner their numbers.
   String? _itemTypeId;
   List<Map<String, dynamic>> _itemTypes = const [];
   bool _scanning = false;
@@ -51,9 +63,14 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   String? _nextNumber;
   String? _loadError;
 
-  /// Fields the app filled in that the person has not touched yet.
+  /// Fields the app filled from defaults, a scan or the last LR, not yet checked by the person.
   final Set<String> _filledByApp = {};
-  bool _freightByChosen = false;
+
+  /// Fields currently holding a calculated value, with how it was worked out.
+  final Map<String, String> _calculated = {};
+
+  /// Fields the person typed in. The app never overwrites these.
+  final Set<String> _typed = {};
   String _lastSuggestedFor = '';
 
   late final List<TextEditingController> _charges = [_freight, _hamali, _otherCharges, _stCharges];
@@ -74,6 +91,8 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     }
     super.dispose();
   }
+
+  Map<String, dynamic>? get _itemType => _itemTypes.where((t) => t['id'] == _itemTypeId).firstOrNull;
 
   Future<void> _loadDefaults() async {
     setState(() => _loadError = null);
@@ -101,11 +120,42 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     _filledByApp.add(key);
   }
 
-  void _touched(String key) {
-    if (_filledByApp.remove(key)) setState(() {});
+  /// Set a calculated value, unless the person has typed their own in that field.
+  void _calculate(String key, TextEditingController controller, String value, String how) {
+    if (_typed.contains(key)) return;
+    controller.text = value;
+    _calculated[key] = how;
+    _filledByApp.remove(key);
   }
 
-  /// When the person leaves the consignor field, reuse what this consignor's last LR had.
+  /// Re-run the three calculations. Call inside setState after any input changes.
+  void _recalculate() {
+    final packages = int.tryParse(_packages.text.trim());
+    final unit = _itemType?['unit_weight_kg'] as num?;
+    if (packages != null && packages > 0 && unit != null) {
+      _calculate('weight', _weight, _plain(packages * unit), '$packages packages × ${_plain(unit)} kg each');
+    }
+    final weight = double.tryParse(_weight.text.trim());
+    if (weight != null && weight > 0) {
+      _calculate('charged_weight', _chargedWeight, _plain(weight), 'Same as the weight');
+    }
+    final rate = double.tryParse(_rate.text.trim());
+    final charged = double.tryParse(_chargedWeight.text.trim());
+    if (rate != null && rate > 0 && charged != null && charged > 0) {
+      _calculate('freight', _freight, (rate * charged).toStringAsFixed(2), '${_plain(rate)} per kg × ${_plain(charged)} kg');
+    }
+  }
+
+  /// The person typed in a field: it is theirs now, and anything calculated from it updates.
+  void _onTyped(String key, String text) => setState(() {
+        _filledByApp.remove(key);
+        _calculated.remove(key);
+        // Clearing a field hands it back to the calculation.
+        text.trim().isEmpty ? _typed.remove(key) : _typed.add(key);
+        _recalculate();
+      });
+
+  /// When the person leaves the consignor fields, reuse what this consignor's last LR had.
   Future<void> _suggestFromLastLr() async {
     final name = _consignor.text.trim();
     final gstin = _consignorGstin.text.trim();
@@ -115,7 +165,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     try {
       final s = await context.read<ApiClient>().get('/lrs/suggestions', query: {
         if (name.isNotEmpty) 'consignor_name': name,
-        if (gstin.isNotEmpty) 'consignor_gstin': gstin,
+        if (_gstin.hasMatch(gstin.toUpperCase())) 'consignor_gstin': gstin,
       }) as Map<String, dynamic>;
       if (!mounted) return;
       setState(() {
@@ -132,6 +182,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
           _itemTypeId = itemType;
           _filledByApp.add('item_type');
         }
+        _recalculate();
       });
     } on ApiException {
       // Suggestions are a convenience; the form works without them.
@@ -143,6 +194,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       showDragHandle: true,
+      backgroundColor: Palette.surface,
       builder: (sheet) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -207,6 +259,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     final picked = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
+      backgroundColor: Palette.surface,
       builder: (sheet) => SafeArea(
         child: ListView(
           shrinkWrap: true,
@@ -215,6 +268,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
             for (final t in _itemTypes)
               ListTile(
                 title: Text(t['name'] as String),
+                subtitle: Text('${_plain(t['unit_weight_kg'] as num)} kg each'),
                 onTap: () => Navigator.of(sheet).pop(t['id'] as String),
               ),
           ],
@@ -225,20 +279,9 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     setState(() {
       _itemTypeId = picked.isEmpty ? null : picked;
       _filledByApp.remove('item_type');
+      _recalculate();
     });
   }
-
-  static String? _checkNumber(String value) => double.tryParse(value) == null ? 'Enter a number' : null;
-
-  static String? _checkWholeNumber(String value) => int.tryParse(value) == null ? 'Enter a whole number' : null;
-
-  static String? _checkEwayBill(String value) =>
-      RegExp(r'^[0-9]{12}$').hasMatch(value) ? null : 'An e-way bill number has 12 digits';
-
-  static String _isoDate(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
-  double get _total => _charges.fold(0, (sum, c) => sum + (double.tryParse(c.text.trim()) ?? 0));
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -249,6 +292,56 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     );
     if (picked != null) setState(() => _date = picked);
   }
+
+  // Validation. Each returns a message to show under the field, or null when the value is fine.
+
+  static String? _checkAmount(String value) {
+    final n = double.tryParse(value);
+    if (n == null) return 'Enter a number';
+    return n < 0 ? 'Cannot be negative' : null;
+  }
+
+  static String? _checkAboveZero(String value) {
+    final n = double.tryParse(value);
+    if (n == null) return 'Enter a number';
+    return n <= 0 ? 'Must be more than 0' : null;
+  }
+
+  static String? _checkRate(String value) {
+    final n = double.tryParse(value);
+    if (n == null) return 'Enter a number';
+    return n <= 0 ? 'Rate cannot be 0. Leave it blank if there is no rate.' : null;
+  }
+
+  static String? _checkPackages(String value) {
+    final n = int.tryParse(value);
+    return n == null || n < 1 ? 'Enter a whole number, 1 or more' : null;
+  }
+
+  static String? _checkGstin(String value) =>
+      _gstin.hasMatch(value.toUpperCase()) ? null : 'A GST number has 15 characters, like 24AABCR4141H1ZQ';
+
+  static String? _checkEwayBill(String value) =>
+      RegExp(r'^[0-9]{12}$').hasMatch(value) ? null : 'An e-way bill number has 12 digits';
+
+  String? _checkTo(String value) =>
+      value.toUpperCase() == _from.text.trim().toUpperCase() ? 'From and To cannot be the same' : null;
+
+  String? _checkConsigneeGstin(String value) => value.toUpperCase() == _consignorGstin.text.trim().toUpperCase()
+      ? 'Same as the consignor GST number'
+      : _checkGstin(value);
+
+  String? _checkChargedWeight(String value) {
+    final problem = _checkAboveZero(value);
+    if (problem != null) return problem;
+    final weight = double.tryParse(_weight.text.trim());
+    return weight != null && double.parse(value) < weight ? 'Cannot be less than the weight' : null;
+  }
+
+  static String _isoDate(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  double get _total => _charges.fold(0, (sum, c) => sum + (double.tryParse(c.text.trim()) ?? 0));
 
   /// Blank optional fields are left out, so the server prints them empty (or as 0.00 for charges).
   Map<String, dynamic> _fields() {
@@ -261,11 +354,11 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
       'consignee_name': _consignee.text.trim(),
       'goods_description': _goods.text.trim(),
       'packages': int.parse(_packages.text.trim()),
+      'weight': _weight.text.trim(),
     };
     final optional = {
       'consignor_gstin': _consignorGstin,
       'consignee_gstin': _consigneeGstin,
-      'weight': _weight,
       'charged_weight': _chargedWeight,
       'rate': _rate,
       'freight': _freight,
@@ -303,6 +396,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     String? Function(String)? check,
     TextInputType? keyboardType,
     TextCapitalization capitalization = TextCapitalization.characters,
+    String? unit,
   }) =>
       AppTextField(
         label: label,
@@ -311,22 +405,77 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
         check: check,
         keyboardType: keyboardType,
         capitalization: capitalization,
+        unit: unit,
         highlighted: _filledByApp.contains(key),
-        onChanged: (_) => _touched(key),
+        helper: _calculated[key],
+        onChanged: (text) => _onTyped(key, text),
       );
 
-  AppTextField _number(String key, String label, TextEditingController controller) => _field(
+  AppTextField _number(
+    String key,
+    String label,
+    TextEditingController controller, {
+    bool mandatory = false,
+    String? Function(String) check = _checkAmount,
+    String? unit,
+  }) =>
+      _field(
         key,
         label,
         controller,
-        check: _checkNumber,
+        mandatory: mandatory,
+        check: check,
+        unit: unit,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
       );
 
-  Widget _section(String title) => Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 12),
-        child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+  /// Two short fields side by side.
+  Widget _pair(Widget left, Widget right) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [Expanded(child: left), const SizedBox(width: 12), Expanded(child: right)],
       );
+
+  Widget _scanCard() {
+    final text = Theme.of(context).textTheme;
+    return Material(
+      color: Palette.primary,
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _scanning ? null : _scanInvoice,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              _scanning
+                  ? const SizedBox.square(
+                      dimension: 28,
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Palette.onPrimary),
+                    )
+                  : const Icon(Icons.document_scanner_outlined, color: Palette.onPrimary, size: 28),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _scanning ? 'Reading the invoice…' : 'Scan the invoice',
+                      style: text.titleMedium!.copyWith(color: Palette.onPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Fills the parties, goods, value and e-way bill for you.',
+                      style: text.bodyMedium!.copyWith(color: Palette.onPrimary),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -346,35 +495,27 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     }
     final text = Theme.of(context).textTheme;
     final muted = StatusColors.of(context).muted;
+    final itemTypeFilled = _filledByApp.contains('item_type');
     return FormPage(
-      title: 'New LR',
+      title: 'New LR $_nextNumber',
       formKey: formKey,
       busy: busy,
       error: error,
       submitLabel: 'Preview',
       onSubmit: () => submit(_preview),
+      footer: ListenableBuilder(
+        listenable: Listenable.merge(_charges),
+        builder: (_, __) => Row(
+          children: [
+            Expanded(child: Text('Total to collect', style: text.bodyMedium!.copyWith(color: muted))),
+            Text('Rs ${_total.toStringAsFixed(2)}', style: text.titleLarge),
+          ],
+        ),
+      ),
       children: [
-        OutlinedButton.icon(
-          onPressed: _scanning ? null : _scanInvoice,
-          icon: const Icon(Icons.document_scanner_outlined),
-          label: Text(_scanning ? 'Reading the invoice…' : 'Scan invoice'),
-        ),
+        _scanCard(),
         const SizedBox(height: 8),
-        _section('Booking'),
-        AppCard(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('LR number $_nextNumber', style: text.titleMedium),
-                const SizedBox(height: 4),
-                Text('Assigned for good when you print.', style: text.bodyMedium!.copyWith(color: muted)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
+        const SectionHeader('Booking', icon: Icons.event_note_outlined),
         Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Column(
@@ -385,6 +526,10 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
               AppCard(
                 child: ListTile(
                   title: Text(lrDateLabel(_isoDate(_date)), style: text.bodyLarge),
+                  subtitle: Text(
+                    'The LR number is fixed when you print.',
+                    style: text.bodySmall!.copyWith(color: muted),
+                  ),
                   trailing: const Icon(Icons.calendar_today_outlined, color: Palette.onSurfaceVariant),
                   onTap: _pickDate,
                 ),
@@ -392,8 +537,10 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
             ],
           ),
         ),
-        _field('from', 'From', _from, mandatory: true),
-        _field('to', 'To', _to, mandatory: true),
+        _pair(
+          _field('from', 'From', _from, mandatory: true),
+          _field('to', 'To', _to, mandatory: true, check: _checkTo),
+        ),
         ChoiceField<String>(
           label: 'Freight by',
           options: _freightByOptions,
@@ -405,7 +552,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
             _filledByApp.remove('freight_by');
           }),
         ),
-        _section('Parties'),
+        const SectionHeader('Parties', icon: Icons.groups_outlined),
         Focus(
           onFocusChange: (hasFocus) {
             if (!hasFocus) _suggestFromLastLr();
@@ -413,22 +560,14 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
           child: Column(
             children: [
               _field('consignor', 'Consignor', _consignor, mandatory: true),
-              _field('consignor_gstin', 'Consignor GST No', _consignorGstin),
+              _field('consignor_gstin', 'Consignor GST No', _consignorGstin, check: _checkGstin),
             ],
           ),
         ),
         _field('consignee', 'Consignee', _consignee, mandatory: true),
-        _field('consignee_gstin', 'Consignee GST No', _consigneeGstin),
-        _section('Goods'),
+        _field('consignee_gstin', 'Consignee GST No', _consigneeGstin, check: _checkConsigneeGstin),
+        const SectionHeader('Goods', icon: Icons.inventory_2_outlined),
         _field('goods', 'Description', _goods, mandatory: true),
-        _field(
-          'packages',
-          'Packages',
-          _packages,
-          mandatory: true,
-          check: _checkWholeNumber,
-          keyboardType: TextInputType.number,
-        ),
         Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Column(
@@ -438,18 +577,12 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
               const SizedBox(height: 8),
               AppCard(
                 child: ListTile(
-                  title: Text(
-                    _itemTypes.where((t) => t['id'] == _itemTypeId).map((t) => t['name'] as String).firstOrNull ??
-                        'Not set',
-                    style: text.bodyLarge,
-                  ),
+                  title: Text(_itemType?['name'] as String? ?? 'Not set', style: text.bodyLarge),
                   subtitle: Text(
-                    _filledByApp.contains('item_type')
+                    itemTypeFilled
                         ? 'Filled in for you. Check it.'
-                        : 'Lets the load planner work out space and weight.',
-                    style: text.bodySmall!.copyWith(
-                      color: _filledByApp.contains('item_type') ? Palette.warning : muted,
-                    ),
+                        : 'Works out the weight from the packages, and helps plan truck loads.',
+                    style: text.bodySmall!.copyWith(color: itemTypeFilled ? Palette.warning : muted),
                   ),
                   trailing: const Icon(Icons.expand_more, color: Palette.onSurfaceVariant),
                   onTap: _pickItemType,
@@ -458,31 +591,32 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
             ],
           ),
         ),
-        _number('weight', 'Weight', _weight),
-        _number('charged_weight', 'Charged weight', _chargedWeight),
-        _number('value', 'Value', _value),
-        _field('eway_bill', 'E-way bill number', _ewayBill, check: _checkEwayBill, keyboardType: TextInputType.number),
-        _section('Charges'),
-        _number('rate', 'Rate', _rate),
-        _number('freight', 'Freight', _freight),
-        _number('hamali', 'Hamali', _hamali),
-        _number('other_charges', 'Other charges', _otherCharges),
-        _number('st_charges', 'ST. charges', _stCharges),
-        AppCard(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: ListenableBuilder(
-              listenable: Listenable.merge(_charges),
-              builder: (_, __) => Row(
-                children: [
-                  Expanded(child: Text('Total', style: text.titleMedium)),
-                  Text(_total.toStringAsFixed(2), style: text.titleMedium),
-                ],
-              ),
-            ),
+        _pair(
+          _field(
+            'packages',
+            'Packages',
+            _packages,
+            mandatory: true,
+            check: _checkPackages,
+            keyboardType: TextInputType.number,
           ),
+          _number('weight', 'Weight', _weight, mandatory: true, check: _checkAboveZero, unit: 'kg'),
         ),
-        const SizedBox(height: 16),
+        _pair(
+          _number('charged_weight', 'Charged weight', _chargedWeight, check: _checkChargedWeight, unit: 'kg'),
+          _number('value', 'Goods value', _value, check: _checkAboveZero, unit: 'Rs'),
+        ),
+        _field('eway_bill', 'E-way bill number', _ewayBill, check: _checkEwayBill, keyboardType: TextInputType.number),
+        const SectionHeader('Charges', icon: Icons.payments_outlined),
+        _pair(
+          _number('rate', 'Rate per kg', _rate, check: _checkRate, unit: 'Rs'),
+          _number('freight', 'Freight', _freight, unit: 'Rs'),
+        ),
+        _pair(
+          _number('hamali', 'Hamali', _hamali, unit: 'Rs'),
+          _number('other_charges', 'Other charges', _otherCharges, unit: 'Rs'),
+        ),
+        _number('st_charges', 'ST. charges', _stCharges, unit: 'Rs'),
       ],
     );
   }
@@ -540,37 +674,25 @@ class _LrConfirmScreenState extends State<LrConfirmScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Check the LR')),
-        body: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: PdfPreview(
-                  build: (_) async => widget.preview,
-                  initialPageFormat: lrPageFormat,
-                  useActions: false,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    if (_error != null) ...[ErrorBanner(_error!), const SizedBox(height: 12)],
-                    FilledButton(
-                      onPressed: _busy ? null : _confirmAndPrint,
-                      child: _busy
-                          ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Text('Confirm and print'),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: _busy ? null : () => Navigator.of(context).pop(),
-                      child: const Text('Back to edit'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+        body: PdfPreview(
+          build: (_) async => widget.preview,
+          initialPageFormat: lrPageFormat,
+          useActions: false,
+        ),
+        bottomNavigationBar: BottomBar(
+          children: [
+            if (_error != null) ...[ErrorBanner(_error!), const SizedBox(height: 12)],
+            FilledButton(
+              onPressed: _busy ? null : _confirmAndPrint,
+              child: _busy
+                  ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Confirm and print'),
+            ),
+            TextButton(
+              onPressed: _busy ? null : () => Navigator.of(context).pop(),
+              child: const Text('Back to edit'),
+            ),
+          ],
         ),
       );
 }

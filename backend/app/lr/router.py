@@ -13,6 +13,7 @@ from app.lr.schemas import (
     LrCancel,
     LrDefaults,
     LrFields,
+    LrPreview,
     LrPrintData,
     LrRead,
     LrSettingsRead,
@@ -68,9 +69,9 @@ def get_suggestions(
 
 
 @router.post("/print-preview", response_class=Response, responses=_PDF)
-def print_preview(body: LrPrintData, _: User = Depends(current_user)) -> Response:
+def print_preview(body: LrPreview, _: User = Depends(current_user)) -> Response:
     """The LR as a PDF, drawn from the values given. Nothing is saved."""
-    return _pdf(body)
+    return _pdf(LrPrintData.model_validate(body))
 
 
 @router.post("", response_model=LrRead, status_code=status.HTTP_201_CREATED)

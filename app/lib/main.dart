@@ -11,6 +11,16 @@ import 'widgets/common.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // A widget that fails to build says what went wrong, instead of leaving a blank grey area.
+  ErrorWidget.builder = (details) => Container(
+        color: Palette.errorContainer,
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          'This part of the screen hit a problem:\n${details.exceptionAsString()}',
+          textDirection: TextDirection.ltr,
+          style: const TextStyle(color: Palette.error, fontSize: 13),
+        ),
+      );
   final api = ApiClient(baseUrl: apiBaseUrl, tokens: const TokenStore());
   runApp(
     MultiProvider(
