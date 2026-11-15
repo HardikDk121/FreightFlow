@@ -1,161 +1,48 @@
-# ============================================================
-# FreightFlow monorepo: FastAPI backend + Flutter app + Docker
-# ============================================================
-
-# ---------- Secrets / env (NEVER commit) ----------
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-*.p12
-*.pfx
-*.jks
-*.keystore
-secrets/
-credentials.json
-service-account*.json
-
-# ---------- Backend: Python ----------
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-*.egg
-.eggs/
-build/
-dist/
-wheels/
-pip-wheel-metadata/
-.installed.cfg
-
-# Virtual envs
-.venv/
-venv/
-env/
-ENV/
-
-# Test / coverage / type / lint caches
-.pytest_cache/
-.coverage
-.coverage.*
-coverage.xml
-htmlcov/
-.tox/
-.nox/
-.hypothesis/
-.mypy_cache/
-.ruff_cache/
-.pyre/
-.pytype/
-
-# Local DB files (tests / scratch)
-*.sqlite
-*.sqlite3
-*.db
-
-# Logs
+# Miscellaneous
+*.class
 *.log
-logs/
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
 
-# ---------- Docker ----------
-docker-compose.override.yml
-docker-compose.override.yaml
-pgdata/
-postgres-data/
-
-# ---------- Frontend: Flutter / Dart ----------
-.dart_tool/
-.packages
-.pub-cache/
-.pub/
-.flutter-plugins
-.flutter-plugins-dependencies
-.metadata
-app/build/
-**/doc/api/
-*.g.dart
-*.freezed.dart
-*.mocks.dart
-
-# Flutter: Android
-app/android/.gradle/
-app/android/local.properties
-app/android/key.properties
-app/android/captures/
-app/android/gradlew
-app/android/gradlew.bat
-app/android/**/GeneratedPluginRegistrant.*
-app/android/app/debug/
-app/android/app/profile/
-app/android/app/release/
-*.apk
-*.aab
-*.jks
-*.keystore
-
-# Flutter: iOS / macOS
-app/ios/Pods/
-app/ios/.symlinks/
-app/ios/Flutter/Flutter.framework
-app/ios/Flutter/Flutter.podspec
-app/ios/Flutter/Generated.xcconfig
-app/ios/Flutter/ephemeral/
-app/ios/Flutter/app.flx
-app/ios/Flutter/app.zip
-app/ios/Flutter/flutter_assets/
-app/ios/Flutter/flutter_export_environment.sh
-app/ios/ServiceDefinitions.json
-app/ios/Runner/GeneratedPluginRegistrant.*
-app/ios/**/xcuserdata/
-app/ios/**/*.xcworkspace/xcuserdata/
-app/macos/Pods/
-app/macos/Flutter/ephemeral/
-*.ipa
-*.dSYM.zip
-*.dSYM
-
-# Flutter: Web / desktop build output
-app/web/.dart_tool/
-app/linux/flutter/ephemeral/
-app/windows/flutter/ephemeral/
-
-# Flutter: other generated
-app/.fvm/
-.fvm/
-app/coverage/
-app/.flutter-plugins-dependencies
-
-# ---------- Editors / IDEs ----------
-.idea/
+# IntelliJ related
 *.iml
 *.ipr
 *.iws
-.vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
-!.vscode/launch.json
-*.swp
-*.swo
-*~
-.project
-.classpath
-.settings/
+.idea/
 
-# ---------- OS junk ----------
-.DS_Store
-.AppleDouble
-.LSOverride
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
 
-# ---------- Misc ----------
-*.bak
-*.tmp
-*.orig
-*.rej
-.cache/
-tmp/
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Widget Preview related
+.widget_preview/
