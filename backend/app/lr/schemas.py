@@ -7,6 +7,8 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from app.eway.rules import Category, Leg
+from app.eway.schemas import DistanceKm, StateCode
 from app.validators import Gstin, PatchModel
 
 Amount = Annotated[Decimal, Field(ge=0, le=Decimal("99999999.99"), decimal_places=2)]
@@ -21,6 +23,17 @@ def _prefix(value: str) -> str:
 
 
 Prefix = Annotated[str, AfterValidator(_prefix)]
+EwayBillNo = Annotated[str, StringConstraints(pattern=r"^[0-9]{12}$")]
+
+
+def _pan(value: str) -> str:
+    value = value.strip().upper()
+    if not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", value):
+        raise ValueError("A PAN has 10 characters, like ABCDE1234F.")
+    return value
+
+
+Pan = Annotated[str, AfterValidator(_pan)]
 
 
 def _text(max_length: int) -> type[str]:
@@ -56,11 +69,28 @@ class LrFields(BaseModel):
     other_charges: Amount = Decimal("0")
     st_charges: Amount = Decimal("0")
     value: Amount | None = None
-    eway_bill_no: Annotated[str, StringConstraints(pattern=r"^[0-9]{12}$")] | None = None
+    eway_bill_no: EwayBillNo | None = None
     item_type_id: uuid.UUID | None = None
+    # E-way bill inputs. A party is "registered" when its GST number is given.
+    from_state: StateCode
+    to_state: StateCode
+    goods_category: Category = Category.REGULAR
+    trip_leg: Leg = Leg.DIRECT
+    distance_km: DistanceKm | None = None
+    hsn_code: Annotated[str, StringConstraints(pattern=r"^[0-9]{4}([0-9]{2}){0,2}$")] | None = None
+    consignor_pan: Pan | None = None
+    consignee_pan: Pan | None = None
+    enrolment_id: Annotated[str, StringConstraints(to_upper=True, pattern=r"^[0-9A-Za-z]{15}$")] | None = None
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "LrFields":
+        for role in ("consignor", "consignee"):
+            gstin, pan = getattr(self, f"{role}_gstin"), getattr(self, f"{role}_pan")
+            # Characters 3 to 12 of a GST number are the holder's PAN.
+            if gstin and pan and gstin[2:12] != pan:
+                raise ValueError(f"The {role}'s PAN does not match its GST number.")
+        if not self.consignor_gstin and not self.consignee_gstin and not (self.consignor_pan and self.consignee_pan):
+            raise ValueError("Neither party has a GST number, so the PAN of both is needed.")
         if self.from_city.lower() == self.to_city.lower():
             raise ValueError("From and To cannot be the same city.")
         if self.charged_weight is not None and self.charged_weight < self.weight:
@@ -108,6 +138,17 @@ class LrRead(LrPrintData):
     status: str
     total: Decimal
     item_type_id: uuid.UUID | None
+    from_state: str | None
+    to_state: str | None
+    goods_category: str
+    distance_km: int | None
+    hsn_code: str | None
+    # not_assessed, not_required, exempt, pending (bill number still needed), awaiting_part_b, active
+    ewb_status: str
+    ewb_responsible: str | None
+    ewb_reason: str | None
+    ewb_vehicle_number: str | None
+    ewb_valid_until: dt.datetime | None
     created_at: dt.datetime
     cancelled_at: dt.datetime | None
     cancel_reason: str | None
@@ -151,3 +192,15 @@ class LrSuggestions(BaseModel):
     goods_description: str | None = None
     consignor_gstin: str | None = None
     item_type_id: uuid.UUID | None = None
+
+
+class PartySuggestion(BaseModel):
+    """A party the company has dealt with before. `city` is where its goods last went (consignees only)."""
+
+    name: str
+    gstin: str | None
+    city: str | None
+
+
+class EwayBillUpdate(BaseModel):
+    eway_bill_no: EwayBillNo

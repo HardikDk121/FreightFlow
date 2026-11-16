@@ -99,3 +99,13 @@ class TripRead(BaseModel):
     dispatched_at: dt.datetime
     completed_at: dt.datetime | None
     lines: list[TripLineRead]
+
+
+class LoadSheetRow(BaseModel):
+    lr_number: str
+    consignor_name: str
+    consignee_name: str
+    goods_description: str
+    packages: int
+    # "Rs 35.00" when the consignee pays on delivery and this is the LR's first trip; otherwise "-".
+    to_collect: str

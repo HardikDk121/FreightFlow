@@ -5,9 +5,11 @@ import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/api_client.dart';
+import '../../format.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/pdf_screen.dart';
 import 'lr_form_screen.dart';
 import 'lr_page.dart';
 
@@ -56,16 +58,48 @@ class _LrListScreenState extends State<LrListScreen> {
     }
   }
 
+  /// Open a screen and refresh on return: an LR may have been booked, cancelled or given its e-way bill.
   Future<void> _open(Widget screen) async {
-    final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => screen));
-    if (changed == true && mounted) await _load();
+    await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => screen));
+    if (mounted) await _load();
+  }
+
+  /// Pick a date range, then show every LR booked in it as a printable register.
+  Future<void> _openRegister() async {
+    final now = DateTime.now();
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: now,
+      initialDateRange: DateTimeRange(start: DateTime(now.year, now.month), end: now),
+    );
+    if (range == null || !mounted) return;
+    String iso(DateTime d) => d.toIso8601String().substring(0, 10);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PdfScreen(
+          title: 'LR register',
+          path: '/lrs/register.pdf?date_from=${iso(range.start)}&date_to=${iso(range.end)}',
+          fileName: 'LR-register-${iso(range.start)}-to-${iso(range.end)}.pdf',
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final canBook = context.select<Session, bool>((s) => s.user?.canBookLr ?? false);
     return Scaffold(
-      appBar: AppBar(title: const Text('LRs')),
+      appBar: AppBar(
+        title: const Text('LRs'),
+        actions: [
+          IconButton(
+            tooltip: 'LR register as PDF',
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            onPressed: _openRegister,
+          ),
+        ],
+      ),
       floatingActionButton: canBook
           ? FloatingActionButton.extended(
               heroTag: 'new-lr',
@@ -190,16 +224,91 @@ class LrDetailScreen extends StatefulWidget {
   State<LrDetailScreen> createState() => _LrDetailScreenState();
 }
 
-class _LrDetailScreenState extends State<LrDetailScreen> {
-  String get _number => widget.lr['lr_number'] as String;
+const _copyOptions = {
+  'all': 'All 4 copies',
+  'consignee': 'Consignee',
+  'office': 'Office',
+  'driver1': 'Driver 1',
+  'driver2': 'Driver 2',
+};
 
-  bool get _cancelled => widget.lr['status'] == 'cancelled';
+class _LrDetailScreenState extends State<LrDetailScreen> {
+  /// Which paper copy to show, print or share.
+  String _copy = 'all';
+
+  /// The LR as last read from the server; replaced when the e-way bill number is added.
+  late Map<String, dynamic> _lr = widget.lr;
+
+  String get _number => _lr['lr_number'] as String;
+
+  bool get _cancelled => _lr['status'] == 'cancelled';
+
+  Future<void> _addEwayBill() async {
+    final number = await showDialog<String>(context: context, builder: (_) => const _EwayBillDialog());
+    if (number == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final updated = await context.read<ApiClient>().patch('/lrs/${_lr['id']}/eway-bill', {'eway_bill_no': number});
+      if (!mounted) return;
+      setState(() {
+        _lr = updated as Map<String, dynamic>;
+        _copy = 'all'; // reload the preview, which now prints the number
+      });
+    } on ApiException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// What the e-way bill rules decided for this LR, and how far the bill has got.
+  Widget _ewayCard() {
+    final text = Theme.of(context).textTheme;
+    final status = _lr['ewb_status'] as String;
+    final validUntil = _lr['ewb_valid_until'] as String?;
+    final (label, background, foreground) = switch (status) {
+      'pending' => ('E-way bill needed', Palette.warningContainer, Palette.warning),
+      'awaiting_part_b' => ('E-way bill: waiting for the vehicle', Palette.warningContainer, Palette.warning),
+      'active' => ('E-way bill active', Palette.successContainer, Palette.success),
+      'exempt' => ('Exempt from e-way bill', Palette.successContainer, Palette.success),
+      'not_required' => ('No e-way bill needed', Palette.successContainer, Palette.success),
+      _ => ('E-way bill not assessed', Palette.background, Palette.onSurfaceMuted),
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: AppCard(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              StatusChip(label, background: background, foreground: foreground),
+              if (_lr['ewb_reason'] != null) ...[
+                const SizedBox(height: 8),
+                Text(_lr['ewb_reason'] as String, style: text.bodyMedium),
+              ],
+              if (_lr['ewb_responsible'] != null && status == 'pending')
+                Text('To be generated by the ${_lr['ewb_responsible']}.', style: text.bodyMedium),
+              if (_lr['eway_bill_no'] != null) Text('Number ${_lr['eway_bill_no']}', style: text.bodyMedium),
+              if (validUntil != null)
+                Text(
+                  'On truck ${_lr['ewb_vehicle_number']}, valid until ${dateTimeLabel(validUntil)}',
+                  style: text.bodyMedium,
+                ),
+              if (status == 'pending') ...[
+                const SizedBox(height: 12),
+                OutlinedButton(onPressed: _addEwayBill, child: const Text('Add the e-way bill number')),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Future<void> _cancel() async {
     final reason = await showDialog<String>(context: context, builder: (_) => const _CancelDialog());
     if (reason == null || !mounted) return;
     try {
-      await context.read<ApiClient>().post('/lrs/${widget.lr['id']}/cancel', {'reason': reason});
+      await context.read<ApiClient>().post('/lrs/${_lr['id']}/cancel', {'reason': reason});
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('LR $_number cancelled.')));
       Navigator.of(context).pop(true);
@@ -227,18 +336,82 @@ class _LrDetailScreenState extends State<LrDetailScreen> {
           ? MessageView(
               icon: Icons.block,
               title: 'This LR is cancelled',
-              body: 'Reason: ${widget.lr['cancel_reason']}\nCancelled LRs cannot be printed.',
+              body: 'Reason: ${_lr['cancel_reason']}\nCancelled LRs cannot be printed.',
             )
-          : PdfPreview(
-              build: (_) => context.read<ApiClient>().getBytes('/lrs/${widget.lr['id']}/pdf'),
-              initialPageFormat: lrPageFormat,
-              canChangePageFormat: false,
-              canChangeOrientation: false,
-              canDebug: false,
-              pdfFileName: 'LR-$_number.pdf',
+          : Column(
+              children: [
+                _ewayCard(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: ChoiceField<String>(
+                    label: 'Copy to print or share',
+                    options: _copyOptions,
+                    value: _copy,
+                    onChanged: (copy) => setState(() => _copy = copy),
+                  ),
+                ),
+                Expanded(
+                  child: PdfPreview(
+                    // A new key reloads the preview when another copy is chosen.
+                    key: ValueKey('$_copy-${_lr['eway_bill_no']}'),
+                    build: (_) => context.read<ApiClient>().getBytes('/lrs/${_lr['id']}/pdf?copy=$_copy'),
+                    initialPageFormat: lrPageFormat,
+                    canChangePageFormat: false,
+                    canChangeOrientation: false,
+                    canDebug: false,
+                    pdfFileName: _copy == 'all' ? 'LR-$_number.pdf' : 'LR-$_number-$_copy.pdf',
+                  ),
+                ),
+              ],
             ),
     );
   }
+}
+
+class _EwayBillDialog extends StatefulWidget {
+  const _EwayBillDialog();
+
+  @override
+  State<_EwayBillDialog> createState() => _EwayBillDialogState();
+}
+
+class _EwayBillDialogState extends State<_EwayBillDialog> {
+  final _number = TextEditingController();
+
+  @override
+  void dispose() {
+    _number.dispose();
+    super.dispose();
+  }
+
+  bool get _valid => RegExp(r'^[0-9]{12}$').hasMatch(_number.text.trim());
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('E-way bill number'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('12 digits. It cannot be changed once saved.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _number,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              maxLength: 12,
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Not now')),
+          TextButton(
+            onPressed: _valid ? () => Navigator.of(context).pop(_number.text.trim()) : null,
+            child: const Text('Save'),
+          ),
+        ],
+      );
 }
 
 class _CancelDialog extends StatefulWidget {

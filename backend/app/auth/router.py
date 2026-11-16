@@ -1,11 +1,22 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.auth import service
-from app.auth.schemas import AcceptInviteRequest, LoginRequest, RefreshRequest, RegisterRequest, TokenPair
+from app.auth import recovery, service
+from app.auth.schemas import (
+    Accepted,
+    AcceptInviteRequest,
+    ForgotPasswordRequest,
+    LoginRequest,
+    RecoverEmailRequest,
+    RefreshRequest,
+    RegisterRequest,
+    ResetPasswordRequest,
+    TokenPair,
+)
 from app.db import get_session
 from app.deps import current_user
 from app.models import User
+from app.notify import Outbox, get_outbox
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -38,3 +49,41 @@ def logout(
 @router.post("/invites/accept", response_model=TokenPair, status_code=status.HTTP_201_CREATED)
 def accept_invite(body: AcceptInviteRequest, session: Session = Depends(get_session)) -> TokenPair:
     return service.accept_invite(session, body)
+
+
+def _ip(request: Request) -> str:
+    # Behind a reverse proxy, configure it to pass the real client address (uvicorn --proxy-headers).
+    return request.client.host if request.client else "unknown"
+
+
+@router.post("/password/forgot", response_model=Accepted, status_code=status.HTTP_202_ACCEPTED)
+def forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    background: BackgroundTasks,
+    outbox: Outbox = Depends(get_outbox),
+    session: Session = Depends(get_session),
+) -> Accepted:
+    """Email a reset code. The reply is the same whether or not the account exists."""
+    recovery.request_password_reset(session, body.login, _ip(request), outbox, background)
+    return Accepted(message="If that account exists, a reset code has been sent to its email.")
+
+
+@router.post("/password/reset", status_code=status.HTTP_204_NO_CONTENT)
+def reset_password(body: ResetPasswordRequest, session: Session = Depends(get_session)) -> Response:
+    """Set a new password with the emailed code. Every existing session is signed out."""
+    recovery.reset_password(session, body.login, body.code, body.new_password)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/email/recover", response_model=Accepted, status_code=status.HTTP_202_ACCEPTED)
+def recover_email(
+    body: RecoverEmailRequest,
+    request: Request,
+    background: BackgroundTasks,
+    outbox: Outbox = Depends(get_outbox),
+    session: Session = Depends(get_session),
+) -> Accepted:
+    """Text the login email to this phone number, if an account uses it. The reply is always the same."""
+    recovery.recover_login_email(session, body.phone, _ip(request), outbox, background)
+    return Accepted(message="If an account uses that phone number, its login email has been sent there by SMS.")

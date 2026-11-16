@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -8,9 +9,23 @@ import 'package:provider/provider.dart';
 import '../../api/api_client.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
+import '../../widgets/suggest_field.dart';
 import 'lr_page.dart';
 
 const _freightByOptions = {'ToPay': 'To pay', 'Paid': 'Paid', 'TBB': 'To be billed'};
+const _categoryOptions = {
+  'regular': 'Regular goods',
+  'job_work': 'For job work',
+  'handicraft': 'Handicraft, exempt dealer',
+  'household_effects': 'Used household effects',
+  'exempt_goods': 'Exempt goods',
+};
+const _legOptions = {
+  'direct': 'Straight to consignee',
+  'consignor_to_hub': 'Consignor to our hub',
+  'hub_to_consignee': 'Our hub to consignee',
+};
+final _pan = RegExp(r'^[A-Z]{5}[0-9]{4}[A-Z]$');
 final _gstin = RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$');
 
 /// 500.0 -> "500", 12.5 -> "12.50".
@@ -50,6 +65,24 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   final _stCharges = TextEditingController();
   final _value = TextEditingController();
   final _ewayBill = TextEditingController();
+  final _distance = TextEditingController();
+  final _hsn = TextEditingController();
+  final _consignorPan = TextEditingController();
+  final _consigneePan = TextEditingController();
+  final _enrolmentId = TextEditingController();
+
+  // E-way bill inputs. States are two-digit GST state codes.
+  List<Map<String, dynamic>> _states = const [];
+  String? _fromState;
+  String? _toState;
+  final Set<String> _statesChosen = {};
+  String _category = 'regular';
+  String _leg = 'direct';
+
+  /// The server's answer on whether an e-way bill is needed, refreshed as the inputs change.
+  Map<String, dynamic>? _requirement;
+  Timer? _evaluateDebounce;
+  int _evaluateRequest = 0;
   DateTime _date = DateTime.now();
   String _freightBy = 'ToPay';
   bool _freightByChosen = false;
@@ -86,9 +119,11 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     for (final c in [
       _from, _to, _consignor, _consignorGstin, _consignee, _consigneeGstin, _goods, _packages, _weight,
       _chargedWeight, _rate, _freight, _hamali, _otherCharges, _stCharges, _value, _ewayBill,
+      _distance, _hsn, _consignorPan, _consigneePan, _enrolmentId,
     ]) {
       c.dispose();
     }
+    _evaluateDebounce?.cancel();
     super.dispose();
   }
 
@@ -100,8 +135,10 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
       final api = context.read<ApiClient>();
       final defaults = await api.get('/lrs/defaults') as Map<String, dynamic>;
       final itemTypes = await api.get('/item-types', query: {'limit': '200'}) as List;
+      final states = await api.get('/eway/states') as List;
       if (!mounted) return;
       setState(() {
+        _states = states.cast<Map<String, dynamic>>();
         _itemTypes = itemTypes.cast<Map<String, dynamic>>();
         _nextNumber = defaults['next_lr_number'] as String;
         _fill('from', _from, defaults['from_city'] as String?);
@@ -153,7 +190,169 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
         // Clearing a field hands it back to the calculation.
         text.trim().isEmpty ? _typed.remove(key) : _typed.add(key);
         _recalculate();
+        _refreshEway();
       });
+
+  String? _stateName(String? code) =>
+      _states.where((s) => s['code'] == code).map((s) => s['name'] as String).firstOrNull;
+
+  /// Call inside setState after anything the e-way bill decision depends on has changed.
+  /// A GST number starts with its state code, so the states follow the GST numbers until
+  /// the person picks a state themselves. Then the decision is asked for again.
+  void _refreshEway() {
+    void follow(String key, TextEditingController gstin, void Function(String code) set) {
+      final text = gstin.text.trim().toUpperCase();
+      if (_statesChosen.contains(key) || !_gstin.hasMatch(text) || _stateName(text.substring(0, 2)) == null) return;
+      set(text.substring(0, 2));
+      _filledByApp.add(key);
+    }
+
+    follow('from_state', _consignorGstin, (code) => _fromState = code);
+    follow('to_state', _consigneeGstin, (code) => _toState = code);
+    _evaluateDebounce?.cancel();
+    _evaluateDebounce = Timer(const Duration(milliseconds: 400), _evaluate);
+  }
+
+  Future<void> _evaluate() async {
+    if (_fromState == null || _toState == null) return;
+    final request = ++_evaluateRequest;
+    final value = double.tryParse(_value.text.trim());
+    final distance = int.tryParse(_distance.text.trim());
+    try {
+      final result = await context.read<ApiClient>().post('/eway/evaluate', {
+        if (value != null && value >= 0) 'value': _value.text.trim(),
+        'from_state': _fromState,
+        'to_state': _toState,
+        'category': _category,
+        'consignor_registered': _gstin.hasMatch(_consignorGstin.text.trim().toUpperCase()),
+        'consignee_registered': _gstin.hasMatch(_consigneeGstin.text.trim().toUpperCase()),
+        if (distance != null && distance > 0 && distance <= 4000) 'distance_km': distance,
+        'leg': _leg,
+      }) as Map<String, dynamic>;
+      // A newer check may have started while this one was in flight.
+      if (mounted && request == _evaluateRequest) setState(() => _requirement = result);
+    } on ApiException {
+      // The decision is advice on this screen; the server decides again when the LR is saved.
+    }
+  }
+
+  Future<void> _pickState(String key) async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: Palette.surface,
+      builder: (sheet) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheet).height * 0.7,
+          child: ListView(
+            children: [
+              for (final state in _states)
+                ListTile(
+                  title: Text(state['name'] as String),
+                  trailing: Text(state['code'] as String),
+                  onTap: () => Navigator.of(sheet).pop(state['code'] as String),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    setState(() {
+      key == 'from_state' ? _fromState = picked : _toState = picked;
+      _statesChosen.add(key);
+      _filledByApp.remove(key);
+      _refreshEway();
+    });
+  }
+
+  Widget _stateField(String key, String label, String? code) {
+    final text = Theme.of(context).textTheme;
+    final filled = _filledByApp.contains(key);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: text.labelMedium),
+          const SizedBox(height: 8),
+          AppCard(
+            child: ListTile(
+              title: Text(_stateName(code) ?? 'Choose', style: text.bodyLarge),
+              subtitle: filled
+                  ? Text('From the GST number. Check it.', style: text.bodySmall!.copyWith(color: Palette.warning))
+                  : null,
+              trailing: const Icon(Icons.expand_more, color: Palette.onSurfaceVariant),
+              onTap: () => _pickState(key),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The e-way bill decision, in words: needed or not, why, who generates it, how long it lasts.
+  Widget _requirementCard() {
+    final text = Theme.of(context).textTheme;
+    final r = _requirement;
+    if (r == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Text(
+          'Choose both states to see whether this LR needs an e-way bill.',
+          style: text.bodyMedium!.copyWith(color: StatusColors.of(context).muted),
+        ),
+      );
+    }
+    final required = r['required'] as bool?;
+    final (label, background, foreground) = switch (required) {
+      true => ('E-way bill needed', Palette.warningContainer, Palette.warning),
+      false => ('No e-way bill needed', Palette.successContainer, Palette.success),
+      null => ('Goods value needed', Palette.primaryContainer, Palette.onPrimaryContainer),
+    };
+    final days = r['validity_days'] as int?;
+    final lines = [
+      '${r['reason']} (${r['rule']})',
+      if (r['responsible'] != null) 'Generated by the ${r['responsible']}.',
+      if (days != null) 'Valid for $days day${days == 1 ? '' : 's'} once the vehicle is entered.',
+      if (required == true && days == null) 'Enter the distance to see how long it stays valid.',
+      for (final note in (r['notes'] as List).cast<String>()) note,
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(16)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: text.titleMedium!.copyWith(color: foreground)),
+            const SizedBox(height: 6),
+            for (final line in lines)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(line, style: text.bodyMedium!.copyWith(color: foreground)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String? _checkPan(String value) => _pan.hasMatch(value.toUpperCase()) ? null : 'A PAN looks like ABCDE1234F';
+
+  static String? _checkDistance(String value) {
+    final n = int.tryParse(value);
+    return n == null || n < 1 || n > 4000 ? 'Whole km, 1 to 4000' : null;
+  }
+
+  static String? _checkHsn(String value) =>
+      RegExp(r'^[0-9]{4}([0-9]{2}){0,2}$').hasMatch(value) ? null : 'An HSN code has 4, 6 or 8 digits';
+
+  static String? _checkEnrolment(String value) =>
+      RegExp(r'^[0-9A-Za-z]{15}$').hasMatch(value) ? null : 'An enrolment ID has 15 characters';
 
   /// When the person leaves the consignor fields, reuse what this consignor's last LR had.
   Future<void> _suggestFromLastLr() async {
@@ -183,6 +382,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
           _filledByApp.add('item_type');
         }
         _recalculate();
+        _refreshEway();
       });
     } on ApiException {
       // Suggestions are a convenience; the form works without them.
@@ -235,6 +435,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
         _fill('goods', _goods, scan['goods_description'] as String?);
         _fill('value', _value, scan['value'] as String?);
         _fill('eway_bill', _ewayBill, scan['eway_bill_no'] as String?);
+        _refreshEway();
       });
       final filled = _filledByApp.length - before;
       messenger.showSnackBar(
@@ -373,10 +574,26 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
       if (text.isNotEmpty) body[entry.key] = text;
     }
     if (_itemTypeId != null) body['item_type_id'] = _itemTypeId;
+    body.addAll({'from_state': _fromState, 'to_state': _toState, 'goods_category': _category, 'trip_leg': _leg});
+    final distance = _distance.text.trim();
+    if (distance.isNotEmpty) body['distance_km'] = int.parse(distance);
+    final upper = {
+      'hsn_code': _hsn,
+      'consignor_pan': _consignorPan,
+      'consignee_pan': _consigneePan,
+      'enrolment_id': _enrolmentId,
+    };
+    for (final entry in upper.entries) {
+      final text = entry.value.text.trim().toUpperCase();
+      if (text.isNotEmpty) body[entry.key] = text;
+    }
     return body;
   }
 
   Future<void> _preview() async {
+    if (_fromState == null || _toState == null) {
+      throw const ApiException(0, 'Choose the From state and the To state in the e-way bill section.');
+    }
     final fields = _fields();
     final pdf = await context
         .read<ApiClient>()
@@ -427,6 +644,36 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
         check: check,
         unit: unit,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      );
+
+  /// A party name with autocomplete from past LRs and the party master. Picking one fills its
+  /// GST number (and, for a consignee, the destination) where those are still empty.
+  Widget _party(String role, String label, TextEditingController controller) => SuggestField(
+        label: label,
+        controller: controller,
+        mandatory: true,
+        highlighted: _filledByApp.contains(role),
+        search: (query) async {
+          final rows = await context.read<ApiClient>().get('/lrs/parties', query: {'q': query, 'role': role});
+          return (rows as List).cast<Map<String, dynamic>>();
+        },
+        titleOf: (row) => row['name'] as String,
+        subtitleOf: (row) => [row['gstin'], row['city']].whereType<String>().join(' · '),
+        onChanged: (text) => _onTyped(role, text),
+        onPicked: (row) {
+          setState(() {
+            _typed.add(role);
+            _filledByApp.remove(role);
+            if (role == 'consignor') {
+              _fill('consignor_gstin', _consignorGstin, row['gstin'] as String?);
+            } else {
+              _fill('consignee_gstin', _consigneeGstin, row['gstin'] as String?);
+              _fill('to', _to, (row['city'] as String?)?.toUpperCase());
+            }
+            _refreshEway();
+          });
+          if (role == 'consignor') _suggestFromLastLr();
+        },
       );
 
   /// Two short fields side by side.
@@ -496,6 +743,8 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     final text = Theme.of(context).textTheme;
     final muted = StatusColors.of(context).muted;
     final itemTypeFilled = _filledByApp.contains('item_type');
+    // With no GST number on either side, the PAN of both is needed.
+    final bothUnregistered = _consignorGstin.text.trim().isEmpty && _consigneeGstin.text.trim().isEmpty;
     return FormPage(
       title: 'New LR $_nextNumber',
       formKey: formKey,
@@ -559,13 +808,17 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
           },
           child: Column(
             children: [
-              _field('consignor', 'Consignor', _consignor, mandatory: true),
+              _party('consignor', 'Consignor', _consignor),
               _field('consignor_gstin', 'Consignor GST No', _consignorGstin, check: _checkGstin),
+              if (_consignorGstin.text.trim().isEmpty)
+                _field('consignor_pan', 'Consignor PAN', _consignorPan, mandatory: bothUnregistered, check: _checkPan),
             ],
           ),
         ),
-        _field('consignee', 'Consignee', _consignee, mandatory: true),
+        _party('consignee', 'Consignee', _consignee),
         _field('consignee_gstin', 'Consignee GST No', _consigneeGstin, check: _checkConsigneeGstin),
+        if (_consigneeGstin.text.trim().isEmpty)
+          _field('consignee_pan', 'Consignee PAN', _consigneePan, mandatory: bothUnregistered, check: _checkPan),
         const SectionHeader('Goods', icon: Icons.inventory_2_outlined),
         _field('goods', 'Description', _goods, mandatory: true),
         Padding(
@@ -606,7 +859,52 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
           _number('charged_weight', 'Charged weight', _chargedWeight, check: _checkChargedWeight, unit: 'kg'),
           _number('value', 'Goods value', _value, check: _checkAboveZero, unit: 'Rs'),
         ),
-        _field('eway_bill', 'E-way bill number', _ewayBill, check: _checkEwayBill, keyboardType: TextInputType.number),
+        const SectionHeader('E-way bill', icon: Icons.verified_outlined),
+        _pair(
+          _stateField('from_state', 'From state', _fromState),
+          _stateField('to_state', 'To state', _toState),
+        ),
+        ChoiceField<String>(
+          label: 'What is being moved',
+          options: _categoryOptions,
+          value: _category,
+          onChanged: (v) => setState(() {
+            _category = v;
+            _refreshEway();
+          }),
+        ),
+        ChoiceField<String>(
+          label: 'This trip goes',
+          options: _legOptions,
+          value: _leg,
+          onChanged: (v) => setState(() {
+            _leg = v;
+            _refreshEway();
+          }),
+        ),
+        _pair(
+          _field(
+            'distance',
+            'Distance',
+            _distance,
+            check: _checkDistance,
+            keyboardType: TextInputType.number,
+            unit: 'km',
+          ),
+          _field('hsn', 'HSN code', _hsn, check: _checkHsn, keyboardType: TextInputType.number),
+        ),
+        _requirementCard(),
+        AppTextField(
+          label: 'E-way bill number',
+          controller: _ewayBill,
+          check: _checkEwayBill,
+          keyboardType: TextInputType.number,
+          highlighted: _filledByApp.contains('eway_bill'),
+          helper: 'If it is not generated yet, add it later from the saved LR, before dispatch.',
+          onChanged: (text) => _onTyped('eway_bill', text),
+        ),
+        if (bothUnregistered)
+          _field('enrolment_id', 'Sender enrolment ID (ENR-03)', _enrolmentId, check: _checkEnrolment),
         const SectionHeader('Charges', icon: Icons.payments_outlined),
         _pair(
           _number('rate', 'Rate per kg', _rate, check: _checkRate, unit: 'Rs'),

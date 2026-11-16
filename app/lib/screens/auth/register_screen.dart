@@ -49,21 +49,36 @@ class _RegisterScreenState extends State<RegisterScreen> with Submitter {
             controller: _company,
             mandatory: true,
             capitalization: TextCapitalization.words,
+            autofillHints: const [AutofillHints.organizationName],
           ),
           AppTextField(
             label: 'Your name',
             controller: _name,
             mandatory: true,
             capitalization: TextCapitalization.words,
+            autofillHints: const [AutofillHints.name],
           ),
           AppTextField(
             label: 'Email',
             controller: _email,
             mandatory: true,
             keyboardType: TextInputType.emailAddress,
+            autofillHints: const [AutofillHints.email],
           ),
-          AppTextField(label: 'Phone', controller: _phone, keyboardType: TextInputType.phone),
-          AppTextField(label: 'Password', controller: _password, mandatory: true, minLength: 8, obscure: true),
+          AppTextField(
+            label: 'Phone',
+            controller: _phone,
+            keyboardType: TextInputType.phone,
+            autofillHints: const [AutofillHints.telephoneNumber],
+          ),
+          AppTextField(
+            label: 'Password',
+            controller: _password,
+            mandatory: true,
+            minLength: 8,
+            obscure: true,
+            autofillHints: const [AutofillHints.newPassword],
+          ),
         ],
       );
 }

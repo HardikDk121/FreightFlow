@@ -25,6 +25,11 @@ _VEHICLE = re.compile(r"\b([a-z]{2}[ -]?\d{1,2}[ -]?[a-z]{1,3}[ -]?\d{4})\b")
 _OLDER = re.compile(r"\b(?:more than|over|older than|above|since)\s+(\d{1,4})\s*(?:days?|din)\b")
 _PENDING_FOR = re.compile(r"\b(?:pending|waiting|left|baki)\b.*?\b(?:for|to|in|at)\s+([a-z][a-z ]{1,28}?)\s*\??$")
 _PARTY = re.compile(r"\b(?:for|of|from|to|by)\s+([a-z][a-z0-9 &.]{2,40}?)\s*\??$")
+# "the 2 packages of machinery went into which trip", "which truck carried the machinery"
+_GOODS = re.compile(
+    r"(?:(\d{1,5})\s+(?:packages?|pkgs?|boxes|cartons|bags|rolls|nag)\s+of\s+)?(?:the\s+)?"
+    r"([a-z][a-z ]{2,40}?)\s+(?:went|gone|go|goes|loaded|carried|sent|dispatched|was|were|is|are)\b"
+)
 _DATE = re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\b")
 _ISO_DATE = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
 _WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
@@ -134,6 +139,14 @@ def interpret(
         return ToolCall("truck_status", {"vehicle_number": re.sub(r"[ -]", "", match.group(1)).upper()})
     if match := _OLDER.search(text):
         return ToolCall("pending_older_than", {"days": int(match.group(1))})
+    # History: which trip or truck carried some goods.
+    if {"truck", "trip"} & set(words) and (match := _GOODS.search(text)):
+        goods = re.sub(r"^(which|what|where|did|the)\s+", "", match.group(2)).strip()
+        carried_by = re.search(r"\b(?:truck|trip|vehicle|lorry)\s+(?:carried|took|had|loaded)\s+(?:the\s+)?([a-z][a-z ]{2,40}?)\s*\??$", text)
+        if carried_by:
+            goods = carried_by.group(1).strip()
+        if goods not in ("truck", "trip", "trucks", "trips", "it"):
+            return ToolCall("find_goods", {"goods": goods, "packages": int(match.group(1)) if match.group(1) else None})
     if "pending" in words:
         if city:
             return ToolCall("pending_by_destination", {"destination": city})

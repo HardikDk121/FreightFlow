@@ -1,3 +1,4 @@
+import datetime as dt
 import uuid
 
 from sqlalchemy import func, or_, select
@@ -5,9 +6,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.errors import conflict, not_found
-from app.lr.schemas import LrDefaults, LrFields, LrSettingsUpdate, LrSuggestions
-from app.models import DispatchLine, ItemType, Lr, LrSettings, User
+from app.errors import AppError, conflict, not_found
+from app.eway.rules import Consignment, Requirement, evaluate
+from app.lr.schemas import LrDefaults, LrFields, LrSettingsUpdate, LrSuggestions, PartySuggestion
+from app.models import DispatchLine, ItemType, Lr, LrSettings, Party, User
 from app.security import utcnow
 
 
@@ -82,9 +84,29 @@ def create(session: Session, actor: User, data: LrFields) -> Lr:
     # A foreign key is checked outside row-level security, so confirm the item type is this company's.
     if data.item_type_id is not None and session.get(ItemType, data.item_type_id) is None:
         raise not_found("Item type")
+    requirement = evaluate(
+        Consignment(
+            value=data.value,
+            from_state=data.from_state,
+            to_state=data.to_state,
+            category=data.goods_category,
+            consignor_registered=data.consignor_gstin is not None,
+            consignee_registered=data.consignee_gstin is not None,
+            distance_km=data.distance_km,
+            leg=data.trip_leg,
+        )
+    )
+    if requirement.required is None:
+        raise AppError(422, "value_needed", requirement.reason)
+    if requirement.required and data.distance_km is None:
+        raise AppError(422, "distance_needed", "This LR needs an e-way bill, so enter the distance in km.")
     settings = _settings(session, actor.company_id, for_update=True)
     number = settings.next_number
     lr = Lr(
+        ewb_status=_ewb_status(requirement, data.eway_bill_no),
+        ewb_responsible=requirement.responsible,
+        ewb_part_b_required=requirement.part_b_required,
+        ewb_reason=f"{requirement.reason} ({requirement.rule})",
         company_id=actor.company_id,
         prefix=settings.prefix,
         series_no=number,
@@ -104,6 +126,39 @@ def create(session: Session, actor: User, data: LrFields) -> Lr:
         entity="lr",
         entity_id=lr.id,
         detail={"lr_number": lr.lr_number},
+    )
+    return lr
+
+
+def _ewb_status(requirement: Requirement, eway_bill_no: str | None) -> str:
+    if not requirement.required:
+        return "exempt" if requirement.rule == "Rule 138(14)" else "not_required"
+    if eway_bill_no is None:
+        return "pending"
+    # With Part A done, the bill covers the road only once a vehicle is entered in Part B.
+    return "awaiting_part_b" if requirement.part_b_required else "active"
+
+
+def set_eway_bill(session: Session, actor: User, lr_id: uuid.UUID, eway_bill_no: str) -> Lr:
+    """Record the e-way bill number once it has been generated. It is entered once and then locked,
+    like the rest of Part A."""
+    lr = get(session, lr_id, for_update=True)
+    if lr.status == "cancelled":
+        raise conflict("This LR is cancelled.")
+    if lr.eway_bill_no is not None:
+        raise conflict(f"LR {lr.lr_number} already has e-way bill {lr.eway_bill_no}.")
+    lr.eway_bill_no = eway_bill_no
+    if lr.ewb_status == "pending":
+        lr.ewb_status = "awaiting_part_b" if lr.ewb_part_b_required else "active"
+    session.flush()
+    audit.record(
+        session,
+        company_id=actor.company_id,
+        actor_id=actor.id,
+        action="lr.set_eway_bill",
+        entity="lr",
+        entity_id=lr.id,
+        detail={"lr_number": lr.lr_number, "eway_bill_no": eway_bill_no},
     )
     return lr
 
@@ -149,3 +204,33 @@ def cancel(session: Session, actor: User, lr_id: uuid.UUID, reason: str) -> Lr:
         detail={"lr_number": lr.lr_number, "reason": reason},
     )
     return lr
+
+
+def booked_between(session: Session, date_from: dt.date, date_to: dt.date) -> list[Lr]:
+    return list(
+        session.scalars(select(Lr).where(Lr.lr_date.between(date_from, date_to)).order_by(Lr.lr_date, Lr.series_no))
+    )
+
+
+def suggest_parties(session: Session, q: str, role: str, limit: int = 6) -> list[PartySuggestion]:
+    """Names from past LRs first (they carry the GSTIN and city actually used), then the party master."""
+    name = Lr.consignor_name if role == "consignor" else Lr.consignee_name
+    gstin = Lr.consignor_gstin if role == "consignor" else Lr.consignee_gstin
+    found: dict[str, PartySuggestion] = {}
+    past = session.execute(
+        select(name, gstin, Lr.to_city)
+        .where(name.icontains(q, autoescape=True), Lr.status == "confirmed")
+        .order_by(Lr.created_at.desc())
+        .limit(50)
+    ).all()
+    for party_name, party_gstin, to_city in past:
+        found.setdefault(
+            party_name.lower(),
+            PartySuggestion(name=party_name, gstin=party_gstin, city=to_city if role == "consignee" else None),
+        )
+    master = session.scalars(
+        select(Party).where(Party.name.icontains(q, autoescape=True), Party.is_active).order_by(Party.name).limit(limit)
+    )
+    for party in master:
+        found.setdefault(party.name.lower(), PartySuggestion(name=party.name.upper(), gstin=party.gstin, city=None))
+    return list(found.values())[:limit]

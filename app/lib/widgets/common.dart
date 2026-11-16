@@ -166,6 +166,8 @@ class AppTextField extends StatelessWidget {
     this.onChanged,
     this.unit,
     this.helper,
+    this.autofillHints,
+    this.lines = 1,
   });
 
   final String label;
@@ -177,6 +179,12 @@ class AppTextField extends StatelessWidget {
 
   /// A neutral line under the field, such as how a calculated value was worked out.
   final String? helper;
+
+  /// What the phone's password manager or keyboard may offer here (AutofillHints.email, ...).
+  final List<String>? autofillHints;
+
+  /// Height in text lines; more than one makes a multi-line box.
+  final int lines;
 
   /// Filled in by the app rather than typed: shown in amber until the person edits it.
   final bool highlighted;
@@ -207,7 +215,10 @@ class AppTextField extends StatelessWidget {
             TextFormField(
               controller: controller,
               obscureText: obscure,
-              keyboardType: keyboardType,
+              keyboardType: lines > 1 ? TextInputType.multiline : keyboardType,
+              minLines: lines,
+              maxLines: lines,
+              autofillHints: autofillHints,
               textCapitalization: capitalization,
               style: Theme.of(context).textTheme.bodyLarge,
               validator: _validate,

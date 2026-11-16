@@ -13,9 +13,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from app.main import app
+from app.notify import Outbox, get_outbox
 
 owner_engine = create_engine(os.environ["FF_MIGRATION_DATABASE_URL"])
-TABLES = "dispatch_line, trip, lr, lr_settings, audit_log, truck, item_type, party, user_invite, auth_token, app_user, company"
+TABLES = "auth_throttle, password_reset, dispatch_line, trip, lr, lr_settings, audit_log, truck, item_type, party, user_invite, auth_token, app_user, company"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -33,8 +34,30 @@ def clean():
         conn.execute(text(f"TRUNCATE {TABLES} RESTART IDENTITY"))
 
 
+class RecordingOutbox(Outbox):
+    """Keeps messages instead of sending them."""
+
+    def __init__(self):
+        self.emails: list[tuple[str, str, str]] = []
+        self.texts: list[tuple[str, str]] = []
+
+    def email(self, to, subject, body):
+        self.emails.append((to, subject, body))
+
+    def sms(self, to, body):
+        self.texts.append((to, body))
+
+
 @pytest.fixture
-def client():
+def outbox():
+    recording = RecordingOutbox()
+    app.dependency_overrides[get_outbox] = lambda: recording
+    yield recording
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client(outbox):
     return TestClient(app)
 
 

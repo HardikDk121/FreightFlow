@@ -7,6 +7,7 @@ import '../../state/session.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
+import '../../widgets/pdf_screen.dart';
 
 StatusChip _statusChip(String status) => status == 'completed'
     ? const StatusChip('Delivered', background: Palette.successContainer, foreground: Palette.success)
@@ -107,12 +108,54 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     await _loader.currentState?.reload();
   }
 
+  /// Take back a delivery marked by mistake, after asking once.
+  Future<void> _undo(Map<String, dynamic> line) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Undo delivery of ${line['lr_number']}?'),
+        content: const Text('The LR goes back to "on road". This is recorded with your name.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialog).pop(false), child: const Text('Keep it')),
+          TextButton(onPressed: () => Navigator.of(dialog).pop(true), child: const Text('Undo delivery')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<ApiClient>().post('/trips/${widget.tripId}/lines/${line['id']}/undo-delivery', {});
+      messenger.showSnackBar(SnackBar(content: Text('Delivery of ${line['lr_number']} undone.')));
+    } on ApiException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+    await _loader.currentState?.reload();
+  }
+
   @override
   Widget build(BuildContext context) {
     final canDispatch = context.select<Session, bool>((s) => s.user?.canDispatch ?? false);
+    final canUndo = context.select<Session, bool>((s) => s.user?.canUndoDelivery ?? false);
     final text = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Trip')),
+      appBar: AppBar(
+        title: const Text('Trip'),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            label: const Text('Load sheet'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => PdfScreen(
+                  title: 'Load sheet',
+                  path: '/trips/${widget.tripId}/load-sheet.pdf',
+                  fileName: 'load-sheet-${widget.tripId}.pdf',
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: Loader<Map<String, dynamic>>(
         key: _loader,
         errorTitle: 'Could not load the trip',
@@ -161,10 +204,20 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                           Text('${line['packages']} packages', style: text.bodyMedium),
                           const SizedBox(height: 12),
                           if (line['delivered_at'] != null)
-                            StatusChip(
-                              'Delivered ${dateTimeLabel(line['delivered_at'] as String)}',
-                              background: Palette.successContainer,
-                              foreground: Palette.success,
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: StatusChip(
+                                      'Delivered ${dateTimeLabel(line['delivered_at'] as String)}',
+                                      background: Palette.successContainer,
+                                      foreground: Palette.success,
+                                    ),
+                                  ),
+                                ),
+                                if (canUndo) TextButton(onPressed: () => _undo(line), child: const Text('Undo')),
+                              ],
                             )
                           else if (canDispatch)
                             OutlinedButton(

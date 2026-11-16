@@ -7,9 +7,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.clock import today
+from app.clock import midnight_after, today
 from app.dispatch.schemas import (
     DispatchRequest,
+    LoadSheetRow,
     PendingDestination,
     PendingLr,
     PlanLine,
@@ -18,6 +19,7 @@ from app.dispatch.schemas import (
     TripRead,
 )
 from app.errors import conflict, not_found
+from app.eway.rules import validity_days
 from app.models import DispatchLine, ItemType, Lr, Trip, Truck, User
 from app.planner.planner import Load, TruckSpec, plan_load
 from app.security import utcnow
@@ -185,6 +187,11 @@ def dispatch(session: Session, actor: User, data: DispatchRequest) -> TripRead:
     """Send a truck out. Every LR row is locked while its remaining packages are checked, so two
     dispatchers cannot both load the same packages."""
     truck = _truck(session, data.truck_id)
+    for paper, expiry in (("insurance", truck.insurance_expiry), ("fitness certificate", truck.fitness_expiry)):
+        if expiry is not None and expiry < today():
+            raise conflict(
+                f"Truck {truck.vehicle_number} cannot go out: its {paper} expired on {expiry.strftime('%d-%m-%Y')}."
+            )
     # Read now: a failed insert below expires every loaded row.
     truck_busy = conflict(f"Truck {truck.vehicle_number} is already out on a trip.")
     if session.scalar(select(Trip.id).where(Trip.truck_id == truck.id, Trip.status == "dispatched")) is not None:
@@ -206,6 +213,16 @@ def dispatch(session: Session, actor: User, data: DispatchRequest) -> TripRead:
         remaining = lr.packages - sent.get(lr.id, 0)
         if wanted[lr.id] > remaining:
             raise conflict(f"LR {lr.lr_number} has only {remaining} packages pending.")
+        if lr.ewb_status == "pending":
+            raise conflict(
+                f"LR {lr.lr_number} needs an e-way bill before it can move. Add the number on the LR first."
+            )
+    # Entering the vehicle is Part B: from now the bill covers the road and its validity runs.
+    for lr in lrs:
+        if lr.ewb_status == "awaiting_part_b":
+            lr.ewb_status = "active"
+            lr.ewb_vehicle_number = truck.vehicle_number
+            lr.ewb_valid_until = midnight_after(today() + dt.timedelta(days=validity_days(lr.distance_km) - 1))
 
     trip = Trip(
         company_id=actor.company_id,
@@ -283,5 +300,70 @@ def deliver(session: Session, actor: User, trip_id: uuid.UUID, line_id: uuid.UUI
         entity="dispatch_line",
         entity_id=line.id,
         detail={"trip_id": str(trip.id), "trip_completed": undelivered == 0},
+    )
+    return _trip_read(session, trip)
+
+
+def load_sheet_rows(session: Session, trip_id: uuid.UUID) -> list[LoadSheetRow]:
+    rows = session.execute(
+        select(DispatchLine, Lr, Trip.dispatched_at)
+        .join(Lr, Lr.id == DispatchLine.lr_id)
+        .join(Trip, Trip.id == DispatchLine.trip_id)
+        .where(DispatchLine.trip_id == trip_id)
+        .order_by(Lr.lr_date, Lr.series_no)
+    ).all()
+    result = []
+    for line, lr, dispatched_at in rows:
+        # A to-pay LR split across trucks is collected once, by the first truck that carries it.
+        earlier = session.scalar(
+            select(func.count())
+            .select_from(DispatchLine)
+            .join(Trip, Trip.id == DispatchLine.trip_id)
+            .where(DispatchLine.lr_id == lr.id, Trip.dispatched_at < dispatched_at)
+        )
+        collect = lr.freight_by == "ToPay" and earlier == 0
+        result.append(
+            LoadSheetRow(
+                lr_number=lr.lr_number,
+                consignor_name=lr.consignor_name,
+                consignee_name=lr.consignee_name,
+                goods_description=lr.goods_description,
+                packages=line.packages,
+                to_collect=f"Rs {lr.total:,.2f}" if collect else "-",
+            )
+        )
+    return result
+
+
+def undo_delivery(session: Session, actor: User, trip_id: uuid.UUID, line_id: uuid.UUID) -> TripRead:
+    """Take back a delivery marked by mistake. The trip goes back on the road if it had completed."""
+    trip = session.get(Trip, trip_id, with_for_update=True)
+    if trip is None:
+        raise not_found("Trip")
+    line = session.scalar(select(DispatchLine).where(DispatchLine.id == line_id, DispatchLine.trip_id == trip.id))
+    if line is None:
+        raise not_found("Trip line")
+    if line.delivered_at is None:
+        raise conflict("This delivery has not been confirmed, so there is nothing to undo.")
+    reopened = trip.status == "completed"
+    if reopened and session.scalar(
+        select(Trip.id).where(Trip.truck_id == trip.truck_id, Trip.status == "dispatched")
+    ) is not None:
+        raise conflict("This truck has since gone out on another trip, so its old trip cannot be reopened.")
+    delivered_at = line.delivered_at
+    line.delivered_at = None
+    line.delivered_by = None
+    if reopened:
+        trip.status = "dispatched"
+        trip.completed_at = None
+    session.flush()
+    audit.record(
+        session,
+        company_id=actor.company_id,
+        actor_id=actor.id,
+        action="trip.undo_delivery",
+        entity="dispatch_line",
+        entity_id=line.id,
+        detail={"trip_id": str(trip.id), "was_delivered_at": delivered_at.isoformat(), "trip_reopened": reopened},
     )
     return _trip_read(session, trip)

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import audit
 from app.chat.interpreter import HELP, REFUSAL, Reply, ToolCall, interpret, is_write_request
+from app.chat.llm import interpret_with_model
 from app.chat.schemas import ChatResponse
 from app.clock import today
 from app.dispatch import service as dispatch_service
@@ -127,6 +128,51 @@ def search_lrs(session: Session, party: str) -> Answer:
     )
 
 
+def _trips_of(session: Session, lr: Lr) -> list[str]:
+    """One line per trip that carried this LR: truck, driver, dates, packages."""
+    rows = session.execute(
+        select(DispatchLine, Trip, Truck.vehicle_number)
+        .join(Trip, Trip.id == DispatchLine.trip_id)
+        .join(Truck, Truck.id == Trip.truck_id)
+        .where(DispatchLine.lr_id == lr.id)
+        .order_by(Trip.dispatched_at)
+    ).all()
+    lines = []
+    for line, trip, vehicle in rows:
+        driver = f", driver {trip.driver_name}" if trip.driver_name else ""
+        delivered = f", delivered {line.delivered_at.strftime('%d-%m-%Y')}" if line.delivered_at else ", not yet delivered"
+        lines.append(
+            f"{line.packages} packages on truck {vehicle} to {trip.destination}{driver}, "
+            f"left {trip.dispatched_at.strftime('%d-%m-%Y')}{delivered}"
+        )
+    return lines
+
+
+def find_goods(session: Session, goods: str, packages: int | None = None) -> Answer:
+    """LRs by what was carried, however long ago, with the trips that carried them."""
+    query = select(Lr).where(Lr.goods_description.icontains(goods, autoescape=True), Lr.status == "confirmed")
+    if packages is not None:
+        query = query.where(Lr.packages == packages)
+    lrs = list(session.scalars(query.order_by(Lr.created_at.desc()).limit(5)))
+    what = f"{packages} packages of {goods}" if packages is not None else goods
+    if not lrs:
+        return f"I found no LR for {what}.", [], ["Show recent LRs"]
+    blocks = []
+    for lr in lrs:
+        trips = _trips_of(session, lr) or ["Not dispatched yet"]
+        eway = f", e-way bill {lr.eway_bill_no}" if lr.eway_bill_no else ""
+        blocks.append(
+            f"• {lr.lr_number}, booked {lr.lr_date.strftime('%d-%m-%Y')}: {lr.packages} packages of "
+            f"{lr.goods_description}, {lr.consignor_name} to {lr.consignee_name}, {lr.to_city}{eway}\n"
+            + "\n".join(f"   {trip}" for trip in trips)
+        )
+    return (
+        f"{len(lrs)} LR{'' if len(lrs) == 1 else 's'} for {what}, newest first:\n" + "\n".join(blocks),
+        [lr.lr_number for lr in lrs],
+        [f"Details of {lrs[0].lr_number}"],
+    )
+
+
 def _lr_state(session: Session, lr: Lr) -> str:
     if lr.status == "cancelled":
         return f"Cancelled. Reason: {lr.cancel_reason}"
@@ -172,7 +218,7 @@ def lr_details(session: Session, lr_number: str, fields: list[str]) -> Answer:
         "value": "Value was not recorded." if lr.value is None else f"Goods value {_money(lr.value)}.",
         "charges": charges,
         "eway": "No e-way bill number was recorded." if lr.eway_bill_no is None else f"E-way bill {lr.eway_bill_no}.",
-        "status": _lr_state(session, lr),
+        "status": " ".join([_lr_state(session, lr), *(f"{trip}." for trip in _trips_of(session, lr))]),
     }
     if fields:
         chosen = list(dict.fromkeys(parts[f] for f in fields))
@@ -231,6 +277,7 @@ TOOLS: dict[str, Callable[..., Answer]] = {
     "arrivals_on_date": arrivals_on_date,
     "recent_lrs": recent_lrs,
     "search_lrs": search_lrs,
+    "find_goods": find_goods,
     "lr_details": lr_details,
     "trips_on_road": trips_on_road,
     "truck_status": truck_status,
@@ -239,7 +286,12 @@ TOOLS: dict[str, Callable[..., Answer]] = {
 
 def ask(session: Session, user: User, message: str, context_lr_number: str | None) -> ChatResponse:
     cities = frozenset(session.scalars(select(func.lower(Lr.to_city)).distinct()))
-    result = interpret(message, today(), cities, context_lr_number)
+    # Requests to change data are refused before any model sees them.
+    result = None
+    if not is_write_request(message):
+        result = interpret_with_model(message, today(), cities, context_lr_number) or interpret(
+            message, today(), cities, context_lr_number
+        )
     if isinstance(result, ToolCall):
         answer, lr_numbers, suggestions = TOOLS[result.tool](session, **result.args)
         response = ChatResponse(answer=answer, tool=result.tool, lr_numbers=lr_numbers, suggestions=suggestions)

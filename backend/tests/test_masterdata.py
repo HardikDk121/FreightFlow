@@ -1,6 +1,6 @@
 from tests.conftest import add_staff, bearer
 
-TRUCK = {"vehicle_number": "gj-03 ab 1234", "inner_length_cm": 500, "inner_width_cm": 200, "inner_height_cm": 200, "payload_kg": 3000}
+TRUCK = {"vehicle_number": "gj-03 ab 1234", "inner_length_cm": 500, "inner_width_cm": 200, "inner_height_cm": 200, "payload_kg": 3000, "model_year": 2022, "insurance_expiry": "2099-01-01", "fitness_expiry": "2099-01-01"}
 CARTON = {"name": "Carton A", "length_cm": 60, "width_cm": 40, "height_cm": 40, "unit_weight_kg": 18}
 
 
@@ -32,7 +32,22 @@ def test_item_type_and_truck_validation(client, admin):
     truck = client.post("/trucks", json=TRUCK, headers=h)
     assert truck.status_code == 201 and truck.json()["vehicle_number"] == "GJ03AB1234"
     assert client.post("/trucks", json={**TRUCK, "vehicle_number": "GJ03AB1234"}, headers=h).status_code == 409
-    assert client.post("/trucks", json={**TRUCK, "vehicle_number": "!!"}, headers=h).status_code == 422
+    assert client.post("/trucks", json={**TRUCK, "vehicle_number": "22bh 1234 aa"}, headers=h).json()["vehicle_number"] == "22BH1234AA"
+    bad_trucks = (
+        {"vehicle_number": "!!"},
+        {"vehicle_number": "TRUCK1"},
+        {"vehicle_number": "GJ03CW062"},
+        {"inner_length_cm": 5},  # metres typed as centimetres
+        {"inner_width_cm": 2000},
+        {"inner_height_cm": 0},
+        {"payload_kg": 3},  # tonnes typed as kilograms
+        {"payload_kg": 900000},
+        {"label": "x" * 41},
+    )
+    for bad in bad_trucks:
+        assert client.post("/trucks", json={**TRUCK, "vehicle_number": "GJ01AA0001", **bad}, headers=h).status_code == 422, bad
+    assert client.patch(f"/trucks/{truck.json()['id']}", json={"payload_kg": 1}, headers=h).status_code == 422
+    assert client.post("/item-types", json={**CARTON, "name": "Feather", "unit_weight_kg": 0}, headers=h).status_code == 422
 
 
 def test_roles_on_master_data(client, admin):

@@ -1,20 +1,28 @@
+import datetime as dt
 import re
 import uuid
 from typing import Annotated
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from app.clock import today
 from app.validators import Gstin, Name, PatchModel, Phone
 
-Positive = Annotated[float, Field(gt=0, le=99_999_999)]
+# One package: up to 15 m long and 5 tonnes.
+PackageSize = Annotated[float, Field(ge=1, le=1500)]
+PackageWeight = Annotated[float, Field(ge=0.01, le=5000)]
 Latitude = Annotated[float, Field(ge=-90, le=90)]
 Longitude = Annotated[float, Field(ge=-180, le=180)]
 
 
+# State series (GJ03CW0620, DL1LAB1234) or Bharat series (22BH1234AA).
+_VEHICLE = re.compile(r"[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}|[0-9]{2}BH[0-9]{4}[A-Z]{1,2}")
+
+
 def _vehicle_number(value: str) -> str:
     value = re.sub(r"[\s-]", "", value).upper()
-    if not re.fullmatch(r"[A-Z0-9]{4,12}", value):
-        raise ValueError("Vehicle number must be 4 to 12 letters and digits.")
+    if not _VEHICLE.fullmatch(value):
+        raise ValueError("Enter a registration number like GJ03CW0620.")
     return value
 
 
@@ -66,10 +74,10 @@ class PartyRead(_Read):
 
 class ItemTypeCreate(BaseModel):
     name: Name
-    length_cm: Positive
-    width_cm: Positive
-    height_cm: Positive
-    unit_weight_kg: Positive
+    length_cm: PackageSize
+    width_cm: PackageSize
+    height_cm: PackageSize
+    unit_weight_kg: PackageWeight
     stackable: bool = True
 
 
@@ -79,10 +87,10 @@ class ItemTypeUpdate(PatchModel):
     )
 
     name: Name | None = None
-    length_cm: Positive | None = None
-    width_cm: Positive | None = None
-    height_cm: Positive | None = None
-    unit_weight_kg: Positive | None = None
+    length_cm: PackageSize | None = None
+    width_cm: PackageSize | None = None
+    height_cm: PackageSize | None = None
+    unit_weight_kg: PackageWeight | None = None
     stackable: bool | None = None
     is_active: bool | None = None
 
@@ -96,13 +104,34 @@ class ItemTypeRead(_Read):
     stackable: bool
 
 
+# Limits wide enough for any road-legal goods vehicle, tight enough to catch a slipped decimal
+# or metres typed as centimetres.
+TruckLength = Annotated[float, Field(ge=100, le=2000)]
+TruckWidth = Annotated[float, Field(ge=100, le=300)]
+TruckHeight = Annotated[float, Field(ge=100, le=450)]
+Payload = Annotated[float, Field(ge=100, le=60000)]
+TruckLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+
+
+def _model_year(value: int) -> int:
+    if not 1990 <= value <= today().year + 1:
+        raise ValueError(f"Model year must be between 1990 and {today().year + 1}.")
+    return value
+
+
+ModelYear = Annotated[int, AfterValidator(_model_year)]
+
+
 class TruckCreate(BaseModel):
     vehicle_number: VehicleNumber
-    label: str | None = None
-    inner_length_cm: Positive
-    inner_width_cm: Positive
-    inner_height_cm: Positive
-    payload_kg: Positive
+    label: TruckLabel | None = None
+    inner_length_cm: TruckLength
+    inner_width_cm: TruckWidth
+    inner_height_cm: TruckHeight
+    payload_kg: Payload
+    model_year: ModelYear
+    insurance_expiry: dt.date
+    fitness_expiry: dt.date
 
 
 class TruckUpdate(PatchModel):
@@ -111,11 +140,14 @@ class TruckUpdate(PatchModel):
     )
 
     vehicle_number: VehicleNumber | None = None
-    label: str | None = None
-    inner_length_cm: Positive | None = None
-    inner_width_cm: Positive | None = None
-    inner_height_cm: Positive | None = None
-    payload_kg: Positive | None = None
+    label: TruckLabel | None = None
+    inner_length_cm: TruckLength | None = None
+    inner_width_cm: TruckWidth | None = None
+    inner_height_cm: TruckHeight | None = None
+    payload_kg: Payload | None = None
+    model_year: ModelYear | None = None
+    insurance_expiry: dt.date | None = None
+    fitness_expiry: dt.date | None = None
     is_active: bool | None = None
 
 
@@ -126,3 +158,7 @@ class TruckRead(_Read):
     inner_width_cm: float
     inner_height_cm: float
     payload_kg: float
+    # Null on trucks added before these were recorded.
+    model_year: int | None
+    insurance_expiry: dt.date | None
+    fitness_expiry: dt.date | None

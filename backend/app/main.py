@@ -9,6 +9,7 @@ from app.dashboard.router import router as dashboard_router
 from app.db import get_session
 from app.dispatch.router import router as dispatch_router
 from app.errors import AppError, app_error_handler
+from app.eway.router import router as eway_router
 from app.lr.router import router as lr_router
 from app.masterdata.router import routers as masterdata_routers
 from app.scan.router import router as scan_router
@@ -22,6 +23,7 @@ for router in (
     company_router,
     *masterdata_routers,
     lr_router,
+    eway_router,
     scan_router,
     dispatch_router,
     chat_router,

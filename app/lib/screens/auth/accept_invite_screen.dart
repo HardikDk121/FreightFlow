@@ -48,9 +48,22 @@ class _AcceptInviteScreenState extends State<AcceptInviteScreen> with Submitter 
             controller: _name,
             mandatory: true,
             capitalization: TextCapitalization.words,
+            autofillHints: const [AutofillHints.name],
           ),
-          AppTextField(label: 'Phone', controller: _phone, keyboardType: TextInputType.phone),
-          AppTextField(label: 'Password', controller: _password, mandatory: true, minLength: 8, obscure: true),
+          AppTextField(
+            label: 'Phone',
+            controller: _phone,
+            keyboardType: TextInputType.phone,
+            autofillHints: const [AutofillHints.telephoneNumber],
+          ),
+          AppTextField(
+            label: 'Password',
+            controller: _password,
+            mandatory: true,
+            minLength: 8,
+            obscure: true,
+            autofillHints: const [AutofillHints.newPassword],
+          ),
         ],
       );
 }

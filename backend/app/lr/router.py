@@ -1,5 +1,6 @@
+import datetime as dt
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
@@ -8,10 +9,12 @@ from app.db import get_session
 from app.deps import current_user, require_roles
 from app.errors import conflict
 from app.lr import service
-from app.lr.printing import render_lr_pdf
+from app.lr.printing import COPIES, render_lr_pdf
 from app.lr.schemas import (
+    EwayBillUpdate,
     LrCancel,
     LrDefaults,
+    PartySuggestion,
     LrFields,
     LrPreview,
     LrPrintData,
@@ -20,7 +23,8 @@ from app.lr.schemas import (
     LrSettingsUpdate,
     LrSuggestions,
 )
-from app.models import Role, User
+from app.models import Company, Role, User
+from app.reports.pdf import build_table_report
 
 router = APIRouter(prefix="/lrs", tags=["lr"])
 _booker = require_roles(Role.ADMIN, Role.MANAGER, Role.CLERK)
@@ -28,12 +32,16 @@ _canceller = require_roles(Role.ADMIN, Role.MANAGER)
 _PDF = {200: {"content": {"application/pdf": {}}}}
 
 
-def _pdf(data: LrPrintData) -> Response:
+def _pdf(content: bytes, name: str) -> Response:
     return Response(
-        content=render_lr_pdf(data),
+        content=content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="LR-{data.lr_number}.pdf"'},
+        headers={"Content-Disposition": f'inline; filename="{name}.pdf"'},
     )
+
+
+def _company(session: Session, user: User) -> Company:
+    return session.get_one(Company, user.company_id)
 
 
 # Fixed paths come before /{lr_id}.
@@ -69,9 +77,57 @@ def get_suggestions(
 
 
 @router.post("/print-preview", response_class=Response, responses=_PDF)
-def print_preview(body: LrPreview, _: User = Depends(current_user)) -> Response:
-    """The LR as a PDF, drawn from the values given. Nothing is saved."""
-    return _pdf(LrPrintData.model_validate(body))
+def print_preview(
+    body: LrPreview, user: User = Depends(current_user), session: Session = Depends(get_session)
+) -> Response:
+    """The LR as a one-page PDF, drawn from the values given. Nothing is saved."""
+    pdf = render_lr_pdf(LrPrintData.model_validate(body), _company(session, user), [""])
+    return _pdf(pdf, f"LR-{body.lr_number}")
+
+
+@router.get("/parties", response_model=list[PartySuggestion])
+def suggest_parties(
+    q: Annotated[str, Query(min_length=2, max_length=60)],
+    role: Literal["consignor", "consignee"],
+    _: User = Depends(_booker),
+    session: Session = Depends(get_session),
+) -> list[PartySuggestion]:
+    """Parties matching what has been typed, for the LR form's autocomplete."""
+    return service.suggest_parties(session, q, role)
+
+
+@router.get("/register.pdf", response_class=Response, responses=_PDF)
+def lr_register(
+    date_from: dt.date,
+    date_to: dt.date,
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Every LR booked between two dates, as a printable register."""
+    if date_to < date_from or (date_to - date_from).days > 366:
+        raise conflict("Choose a range of up to one year, with the end on or after the start.")
+    lrs = service.booked_between(session, date_from, date_to)
+    live = [lr for lr in lrs if lr.status == "confirmed"]
+    pdf = build_table_report(
+        company_name=_company(session, user).name.upper(),
+        title="LR REGISTER",
+        subtitle=f"{date_from.strftime('%d-%m-%Y')} to {date_to.strftime('%d-%m-%Y')}",
+        columns=[("LR No", 24), ("Date", 19), ("Consignor", 38), ("Consignee", 38), ("To", 22), ("Pkgs", 12), ("Total", 27)],
+        rows=[
+            [
+                lr.lr_number,
+                lr.lr_date.strftime("%d-%m-%Y"),
+                lr.consignor_name,
+                lr.consignee_name,
+                lr.to_city,
+                str(lr.packages),
+                "CANCELLED" if lr.status == "cancelled" else f"{lr.total:,.2f} {lr.freight_by}",
+            ]
+            for lr in lrs
+        ],
+        totals=[f"{len(live)} LRs", "", "", "", "", str(sum(lr.packages for lr in live)), f"{sum(lr.total for lr in live):,.2f}"],
+    )
+    return _pdf(pdf, f"LR-register-{date_from}-to-{date_to}")
 
 
 @router.post("", response_model=LrRead, status_code=status.HTTP_201_CREATED)
@@ -97,11 +153,19 @@ def get_lr(lr_id: uuid.UUID, _: User = Depends(current_user), session: Session =
 
 
 @router.get("/{lr_id}/pdf", response_class=Response, responses=_PDF)
-def get_lr_pdf(lr_id: uuid.UUID, _: User = Depends(current_user), session: Session = Depends(get_session)) -> Response:
+def get_lr_pdf(
+    lr_id: uuid.UUID,
+    copy: Literal["all", "consignee", "office", "driver1", "driver2"] = "all",
+    user: User = Depends(current_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    """The saved LR. `copy=all` gives four pages, one per paper copy; otherwise the one copy named."""
     lr = service.get(session, lr_id)
     if lr.status == "cancelled":
         raise conflict("A cancelled LR cannot be printed.")
-    return _pdf(LrPrintData.model_validate(lr))
+    labels = list(COPIES.values()) if copy == "all" else [COPIES[copy]]
+    pdf = render_lr_pdf(LrPrintData.model_validate(lr), _company(session, user), labels)
+    return _pdf(pdf, f"LR-{lr.lr_number}" + ("" if copy == "all" else f"-{copy}"))
 
 
 @router.post("/{lr_id}/cancel", response_model=LrRead)
@@ -112,3 +176,14 @@ def cancel_lr(
     session: Session = Depends(get_session),
 ) -> LrRead:
     return LrRead.model_validate(service.cancel(session, actor, lr_id, body.reason))
+
+
+@router.patch("/{lr_id}/eway-bill", response_model=LrRead)
+def set_eway_bill(
+    lr_id: uuid.UUID,
+    body: EwayBillUpdate,
+    actor: User = Depends(_booker),
+    session: Session = Depends(get_session),
+) -> LrRead:
+    """Add the e-way bill number to a saved LR. The one detail that can be added after printing."""
+    return LrRead.model_validate(service.set_eway_bill(session, actor, lr_id, body.eway_bill_no))

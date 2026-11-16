@@ -51,6 +51,9 @@ class Company(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     address: Mapped[str | None] = mapped_column(Text)
     gstin: Mapped[str | None] = mapped_column(Text)
+    # Printed on the LR header with the name, address and GSTIN.
+    tagline: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
 
@@ -148,6 +151,9 @@ class Truck(Base):
     inner_width_cm: Mapped[float] = _measure()
     inner_height_cm: Mapped[float] = _measure()
     payload_kg: Mapped[float] = _measure()
+    model_year: Mapped[int | None] = mapped_column(Integer)
+    insurance_expiry: Mapped[date | None] = mapped_column(Date)
+    fitness_expiry: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
@@ -216,6 +222,23 @@ class Lr(Base):
     eway_bill_no: Mapped[str | None] = mapped_column(Text)
     # What one package is, when known. Gives the load planner its size and weight.
     item_type_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("item_type.id"))
+    # E-way bill. The first block is what the clerk enters; the ewb_* block is the engine's
+    # decision at booking, then the bill's progress. States are two-digit GST state codes.
+    from_state: Mapped[str | None] = mapped_column(Text)
+    to_state: Mapped[str | None] = mapped_column(Text)
+    goods_category: Mapped[str] = mapped_column(Text, nullable=False, default="regular")
+    trip_leg: Mapped[str] = mapped_column(Text, nullable=False, default="direct")
+    distance_km: Mapped[int | None] = mapped_column(Integer)
+    hsn_code: Mapped[str | None] = mapped_column(Text)
+    consignor_pan: Mapped[str | None] = mapped_column(Text)
+    consignee_pan: Mapped[str | None] = mapped_column(Text)
+    enrolment_id: Mapped[str | None] = mapped_column(Text)
+    ewb_status: Mapped[str] = mapped_column(Text, nullable=False, default="not_assessed")
+    ewb_responsible: Mapped[str | None] = mapped_column(Text)
+    ewb_part_b_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ewb_reason: Mapped[str | None] = mapped_column(Text)
+    ewb_vehicle_number: Mapped[str | None] = mapped_column(Text)
+    ewb_valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
     created_at: Mapped[datetime] = _created_at()
     cancelled_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
@@ -252,3 +275,26 @@ class DispatchLine(Base):
     packages: Mapped[int] = mapped_column(Integer, nullable=False)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivered_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+
+
+class PasswordReset(Base):
+    """A six-digit reset code, stored as a keyed hash. Single use, short-lived, five wrong tries at most."""
+
+    __tablename__ = "password_reset"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    code_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+
+
+class AuthThrottle(Base):
+    __tablename__ = "auth_throttle"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = _created_at()

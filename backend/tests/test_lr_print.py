@@ -20,6 +20,8 @@ SAMPLE = {
     "st_charges": "35",
     "value": "12048",
     "eway_bill_no": "622194022693",
+    "from_state": "24",
+    "to_state": "22",
 }
 
 
@@ -36,7 +38,7 @@ def test_preview_prints_the_form_and_the_values(client, admin):
     width, height = reader.pages[0].mediabox.width, reader.pages[0].mediabox.height
     assert (round(float(width) * 25.4 / 72), round(float(height) * 25.4 / 72)) == (210, 148)
     text = _text(response.content)
-    for fixed in ("SHARMA LOGISTICS", "CONSINMENT NOTE", "Consignor", "HAMALI", "ST. CH."):
+    for fixed in ("SHREE TRANSPORT", "CONSINMENT NOTE", "Consignor", "HAMALI", "ST. CH."):
         assert fixed in text
     for value in ("RJT-422692", "04-10-2026", "RAJKOT", "RANGOLI LAMINATE", "22AWCPP8803A1Z0", "100.00", "12048", "622194022693"):
         assert value in text

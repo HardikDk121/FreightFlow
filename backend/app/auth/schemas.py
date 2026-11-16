@@ -32,3 +32,21 @@ class TokenPair(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+
+
+class ForgotPasswordRequest(BaseModel):
+    login: str = Field(min_length=3, max_length=254, description="Email or phone.")
+
+
+class ResetPasswordRequest(BaseModel):
+    login: str = Field(min_length=3, max_length=254)
+    code: str = Field(pattern=r"^[0-9]{6}$")
+    new_password: Password
+
+
+class RecoverEmailRequest(BaseModel):
+    phone: Phone
+
+
+class Accepted(BaseModel):
+    message: str

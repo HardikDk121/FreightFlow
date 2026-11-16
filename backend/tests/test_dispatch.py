@@ -4,7 +4,7 @@ from app.clock import today
 from tests.conftest import add_staff, bearer, register
 from tests.test_lr import NEW_LR
 
-TRUCK = {"vehicle_number": "GJ03CW0620", "inner_length_cm": 500, "inner_width_cm": 200, "inner_height_cm": 200, "payload_kg": 3000}
+TRUCK = {"vehicle_number": "GJ03CW0620", "inner_length_cm": 500, "inner_width_cm": 200, "inner_height_cm": 200, "payload_kg": 3000, "model_year": 2022, "insurance_expiry": "2099-01-01", "fitness_expiry": "2099-01-01"}
 
 
 def _item(client, h, name, dims, weight):

@@ -72,7 +72,7 @@ class AccountScreen extends StatelessWidget {
                   const Divider(indent: 16, endIndent: 16),
                   tile(Icons.group_outlined, 'Team', () => open(const UsersScreen())),
                   const Divider(indent: 16, endIndent: 16),
-                  tile(Icons.apartment_outlined, 'Company settings', () => open(const CompanyScreen())),
+                  tile(Icons.apartment_outlined, 'Company and LR header', () => open(const CompanyScreen())),
                   const Divider(indent: 16, endIndent: 16),
                   tile(Icons.receipt_long_outlined, 'LR settings', () => open(const LrSettingsScreen())),
                 ],
@@ -133,7 +133,12 @@ class _ProfileScreenState extends State<ProfileScreen> with Submitter {
             mandatory: true,
             capitalization: TextCapitalization.words,
           ),
-          AppTextField(label: 'Phone', controller: _phone, keyboardType: TextInputType.phone),
+          AppTextField(
+            label: 'Phone',
+            controller: _phone,
+            keyboardType: TextInputType.phone,
+            autofillHints: const [AutofillHints.telephoneNumber],
+          ),
           ChoiceField<String>(
             label: 'Language',
             options: _languages,
@@ -180,13 +185,26 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> with Submit
         submitLabel: 'Change password',
         onSubmit: () => submit(_save),
         children: [
-          AppTextField(label: 'Current password', controller: _current, mandatory: true, obscure: true),
-          AppTextField(label: 'New password', controller: _next, mandatory: true, minLength: 8, obscure: true),
+          AppTextField(
+            label: 'Current password',
+            controller: _current,
+            mandatory: true,
+            obscure: true,
+            autofillHints: const [AutofillHints.password],
+          ),
+          AppTextField(
+            label: 'New password',
+            controller: _next,
+            mandatory: true,
+            minLength: 8,
+            obscure: true,
+            autofillHints: const [AutofillHints.newPassword],
+          ),
         ],
       );
 }
 
-/// Admin only. Loads the company, then edits name, address and GSTIN.
+/// Admin only. These details are printed as the header of every LR.
 class CompanyScreen extends StatefulWidget {
   const CompanyScreen({super.key});
 
@@ -196,8 +214,10 @@ class CompanyScreen extends StatefulWidget {
 
 class _CompanyScreenState extends State<CompanyScreen> with Submitter {
   final _name = TextEditingController();
+  final _tagline = TextEditingController();
   final _address = TextEditingController();
   final _gstin = TextEditingController();
+  final _phone = TextEditingController();
   bool _loaded = false;
   String? _loadError;
 
@@ -209,10 +229,16 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
 
   @override
   void dispose() {
-    _name.dispose();
-    _address.dispose();
-    _gstin.dispose();
+    for (final c in [_name, _tagline, _address, _gstin, _phone]) {
+      c.dispose();
+    }
     super.dispose();
+  }
+
+  static String? _checkAddress(String value) {
+    final lines = value.split('\n').where((l) => l.trim().isNotEmpty);
+    if (lines.length > 3) return 'Up to 3 lines fit on the LR';
+    return lines.any((l) => l.trim().length > 48) ? 'Each line can be up to 48 characters' : null;
   }
 
   Future<void> _load() async {
@@ -221,8 +247,10 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
       final company = await context.read<ApiClient>().get('/company') as Map<String, dynamic>;
       if (!mounted) return;
       _name.text = company['name'] as String;
+      _tagline.text = company['tagline'] as String? ?? '';
       _address.text = company['address'] as String? ?? '';
       _gstin.text = company['gstin'] as String? ?? '';
+      _phone.text = company['phone'] as String? ?? '';
       setState(() => _loaded = true);
     } on ApiException catch (e) {
       if (mounted) setState(() => _loadError = e.message);
@@ -233,8 +261,10 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
     String? orNull(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
     await context.read<ApiClient>().patch('/company', {
       'name': _name.text.trim(),
+      'tagline': orNull(_tagline),
       'address': orNull(_address),
       'gstin': orNull(_gstin),
+      'phone': orNull(_phone),
     });
     if (mounted) Navigator.of(context).pop();
   }
@@ -269,8 +299,22 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
           mandatory: true,
           capitalization: TextCapitalization.words,
         ),
-        AppTextField(label: 'Address', controller: _address, capitalization: TextCapitalization.sentences),
+        AppTextField(
+          label: 'Tagline',
+          controller: _tagline,
+          capitalization: TextCapitalization.words,
+          helper: 'Printed under the name, like “Fleet owners & transport contractors”.',
+        ),
+        AppTextField(
+          label: 'Address',
+          controller: _address,
+          lines: 3,
+          check: _checkAddress,
+          capitalization: TextCapitalization.words,
+          helper: 'Up to 3 lines of 48 characters, printed top right on the LR.',
+        ),
         AppTextField(label: 'GSTIN', controller: _gstin, capitalization: TextCapitalization.characters),
+        AppTextField(label: 'Contact number', controller: _phone, keyboardType: TextInputType.phone),
       ],
     );
   }
