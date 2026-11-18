@@ -11,6 +11,7 @@ import base64
 import binascii
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 
 import cv2
@@ -34,16 +35,53 @@ class UnreadableImage(Exception):
     pass
 
 
+def _deskew(gray: np.ndarray) -> np.ndarray:
+    """Rotate so the lines of print run level. Photos taken by hand are usually a few degrees off."""
+    ink = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+    points = cv2.findNonZero(ink)
+    if points is None:
+        return gray
+    angle = cv2.minAreaRect(points)[-1]
+    angle = angle - 90 if angle > 45 else angle
+    if abs(angle) < 0.5 or abs(angle) > 15:  # level already, or not a tilt this can judge
+        return gray
+    height, width = gray.shape
+    matrix = cv2.getRotationMatrix2D((width / 2, height / 2), angle, 1.0)
+    return cv2.warpAffine(gray, matrix, (width, height), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+
+def _versions(image: np.ndarray) -> list[np.ndarray]:
+    """The photo prepared three ways. Different damage needs different repair, so each is read
+    and the answers are combined field by field."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # Phone photos are small for OCR; doubling the size makes thin print readable.
+    enlarged = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    level = _deskew(enlarged)
+    # Evens out shadows and dim light.
+    contrast = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(level)
+    # Pure black on white, judged patch by patch: copes with glare and creases.
+    binary = cv2.adaptiveThreshold(
+        cv2.medianBlur(contrast, 3), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
+    )
+    return [enlarged, contrast, binary]
+
+
 def scan_invoice(image_bytes: bytes, own_gstin: str | None) -> InvoiceScan:
     image = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise UnreadableImage
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    # Phone photos are small for OCR; doubling the size makes thin print readable.
-    enlarged = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    text = pytesseract.image_to_string(enlarged, config="--psm 6")
-    qr_text, _, _ = cv2.QRCodeDetector().detectAndDecode(image)
-    return extract_fields(text, parse_einvoice_qr(qr_text), own_gstin)
+    qr = parse_einvoice_qr(cv2.QRCodeDetector().detectAndDecode(image)[0])
+    # Each reading runs Tesseract as its own process, so the three run side by side.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        texts = list(pool.map(lambda version: pytesseract.image_to_string(version, config="--psm 6"), _versions(image)))
+    readings = [extract_fields(text, qr, own_gstin).model_dump() for text in texts]
+    # For each field, take the value most versions agree on; a field one version missed is
+    # filled from another.
+    merged = {}
+    for name in InvoiceScan.model_fields:
+        values = [reading[name] for reading in readings if reading[name] is not None]
+        merged[name] = max(values, key=values.count) if values else None
+    return InvoiceScan(**merged)
 
 
 def parse_einvoice_qr(qr_text: str) -> dict:
@@ -112,7 +150,9 @@ def extract_fields(text: str, qr: dict, own_gstin: str | None) -> InvoiceScan:
             words = re.sub(r"[^A-Za-z ]", " ", lines[hsn_at])
             description = _clean_name(" ".join(words.split()), 50)
 
+    hsn = _HSN_ROW.search(lines[hsn_at]).group() if hsn_at is not None else None
     return InvoiceScan(
+        hsn_code=qr.get("MainHsnCode") if re.fullmatch(r"[0-9]{4,8}", str(qr.get("MainHsnCode", ""))) else hsn,
         consignor_name=_clean_name(signed, 60) if signed else None,
         consignor_gstin=seller,
         consignee_name=_clean_name(consignee_block[0], 60) if consignee_block else None,

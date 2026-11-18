@@ -8,10 +8,10 @@ from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app import audit
 from app.errors import AppError, conflict, not_found
-from app.models import ItemType, Party, Truck, User
+from app.models import ItemType, Party, RateRule, Route, Station, Truck, User
 
 
-class MasterDataService[M: (Party, ItemType, Truck)]:
+class MasterDataService[M: (Party, ItemType, Truck, Station, Route, RateRule)]:
     """Search, read, create and update for one master-data table. Rows are deactivated, never deleted."""
 
     def __init__(self, model: type[M], *, label: str, key: InstrumentedAttribute[str]) -> None:
@@ -67,3 +67,6 @@ class MasterDataService[M: (Party, ItemType, Truck)]:
 parties = MasterDataService(Party, label="Party", key=Party.name)
 item_types = MasterDataService(ItemType, label="Item type", key=ItemType.name)
 trucks = MasterDataService(Truck, label="Truck", key=Truck.vehicle_number)
+stations = MasterDataService(Station, label="Station", key=Station.name)
+routes = MasterDataService(Route, label="Route", key=Route.name)
+rate_rules = MasterDataService(RateRule, label="Rate", key=RateRule.goods_class)

@@ -12,3 +12,8 @@ def today() -> dt.date:
 def midnight_after(day: dt.date) -> dt.datetime:
     """The instant `day` ends in business time."""
     return dt.datetime.combine(day + dt.timedelta(days=1), dt.time.min, _BUSINESS_ZONE)
+
+
+def start_of(day: dt.date) -> dt.datetime:
+    """The instant `day` begins in business time."""
+    return dt.datetime.combine(day, dt.time.min, _BUSINESS_ZONE)

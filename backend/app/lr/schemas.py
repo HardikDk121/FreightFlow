@@ -61,8 +61,11 @@ class LrFields(BaseModel):
     consignee_gstin: Gstin | None = None
     goods_description: _text(50)
     packages: int = Field(gt=0, le=99999)
+    # Total weight. The form works it out as packages x weight per package; it can be overridden.
     weight: PositiveWeight
+    weight_per_package: PositiveWeight | None = None
     charged_weight: PositiveWeight | None = None
+    rate_rule_id: uuid.UUID | None = None
     rate: Amount = Decimal("0")
     freight: Amount = Decimal("0")
     hamali: Amount = Decimal("0")
@@ -138,6 +141,8 @@ class LrRead(LrPrintData):
     status: str
     total: Decimal
     item_type_id: uuid.UUID | None
+    weight_per_package: Decimal | None
+    rate_rule_id: uuid.UUID | None
     from_state: str | None
     to_state: str | None
     goods_category: str

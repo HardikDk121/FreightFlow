@@ -16,7 +16,7 @@ from app.main import app
 from app.notify import Outbox, get_outbox
 
 owner_engine = create_engine(os.environ["FF_MIGRATION_DATABASE_URL"])
-TABLES = "auth_throttle, password_reset, dispatch_line, trip, lr, lr_settings, audit_log, truck, item_type, party, user_invite, auth_token, app_user, company"
+TABLES = "payment, rate_rule, route, station, auth_throttle, password_reset, dispatch_line, challan, trip, lr, lr_settings, audit_log, truck, item_type, party, user_invite, auth_token, app_user, company"
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -45,6 +45,7 @@ def test_rules_read_an_invoice():
         "goods_description": "DECORATIVE LAMINATE SHEET",
         "value": Decimal("10690.80"),
         "eway_bill_no": "712345678901",
+        "hsn_code": "48239019",
     }
 
 

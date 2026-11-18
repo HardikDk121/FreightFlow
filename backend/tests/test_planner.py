@@ -40,3 +40,10 @@ def test_unsized_and_oversized_are_reported_not_planned():
     unsized, long_pipe = _load(5, None, None), _load(2, (600, 10, 10), 5)
     plan = plan_load(TRUCK, [unsized, long_pipe])
     assert plan.lines == [] and plan.unsized == [unsized.lr_id] and plan.too_big == [long_pipe.lr_id]
+
+
+def test_a_load_with_weight_but_no_size_is_fitted_by_weight_alone():
+    heavy = _load(100, None, 50)
+    plan = plan_load(TRUCK, [heavy])
+    assert plan.lines[0].packages == 60 and plan.weight_only == [heavy.lr_id]
+    assert plan.volume_used_m3 == 0 and plan.weight_used_kg == D(3000)

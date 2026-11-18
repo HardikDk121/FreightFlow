@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import BigInteger, Boolean, Computed, Date, DateTime, Enum, ForeignKey, Integer, Numeric, Text, func
-from sqlalchemy.dialects.postgresql import CITEXT, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, CITEXT, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -154,6 +154,8 @@ class Truck(Base):
     model_year: Mapped[int | None] = mapped_column(Integer)
     insurance_expiry: Mapped[date | None] = mapped_column(Date)
     fitness_expiry: Mapped[date | None] = mapped_column(Date)
+    # Where the truck stands when it is not on a trip: the last stop of its last trip.
+    current_station: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
@@ -184,6 +186,7 @@ class LrSettings(Base):
     next_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     from_city: Mapped[str | None] = mapped_column(Text)
     default_st_charges: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=Decimal("0"))
+    next_trip_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_at: Mapped[datetime] = _updated_at()
 
 
@@ -239,6 +242,9 @@ class Lr(Base):
     ewb_reason: Mapped[str | None] = mapped_column(Text)
     ewb_vehicle_number: Mapped[str | None] = mapped_column(Text)
     ewb_valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Pricing: what one package weighs, and the rate rule the freight was worked out from.
+    weight_per_package: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    rate_rule_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("rate_rule.id"))
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
     created_at: Mapped[datetime] = _created_at()
     cancelled_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
@@ -254,6 +260,10 @@ class Trip(Base):
     id: Mapped[uuid.UUID] = _uuid_pk()
     company_id: Mapped[uuid.UUID] = _company_fk()
     truck_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("truck.id"), nullable=False)
+    # Counts up per company. Challans are numbered from it: CH-12, then CH-12/S1 for added cargo.
+    trip_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The stations in the order the truck reaches them. `destination` is the last one.
+    route: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     destination: Mapped[str] = mapped_column(Text, nullable=False)
     driver_name: Mapped[str | None] = mapped_column(Text)
     driver_phone: Mapped[str | None] = mapped_column(Text)
@@ -272,6 +282,8 @@ class DispatchLine(Base):
     company_id: Mapped[uuid.UUID] = _company_fk()
     trip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trip.id"), nullable=False)
     lr_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lr.id"), nullable=False)
+    # The sealed document this loading is recorded on.
+    challan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("challan.id"), nullable=False)
     packages: Mapped[int] = mapped_column(Integer, nullable=False)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     delivered_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
@@ -298,3 +310,97 @@ class AuthThrottle(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     key_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = _created_at()
+
+
+class Station(Base):
+    """A delivery station, the zone whose rates it uses, and what it adds per kg on top."""
+
+    __tablename__ = "station"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    zone: Mapped[str] = mapped_column(Text, nullable=False)
+    surcharge_per_kg: Mapped[float] = mapped_column(Numeric(8, 2, asdecimal=False), nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class Route(Base):
+    """Stations one truck serves in a single run, in order."""
+
+    __tablename__ = "route"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    stops: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class RateRule(Base):
+    """How freight is charged for one class of goods in one zone."""
+
+    __tablename__ = "rate_rule"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    goods_class: Mapped[str] = mapped_column(Text, nullable=False)
+    zone: Mapped[str] = mapped_column(Text, nullable=False)
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    rate: Mapped[float | None] = mapped_column(Numeric(10, 2, asdecimal=False))
+    slabs: Mapped[list[dict] | None] = mapped_column(JSONB)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class Payment(Base):
+    """Money received against one LR. Insert-only."""
+
+    __tablename__ = "payment"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    lr_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("lr.id"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    mode: Mapped[str] = mapped_column(Text, nullable=False)
+    reference: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
+    received_on: Mapped[date] = mapped_column(Date, nullable=False)
+    received_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Challan(Base):
+    """A sealed list of what was put on a truck at one place. A trip has one primary challan and
+    one supplementary challan for each time cargo is added on the road. The database role the API
+    runs as cannot change a challan's trip, number, requester or requested lines."""
+
+    __tablename__ = "challan"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    trip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trip.id"), nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    challan_number: Mapped[str] = mapped_column(Text, nullable=False)
+    loaded_at: Mapped[str] = mapped_column(Text, nullable=False)
+    insert_before: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_lines: Mapped[list[dict]] = mapped_column(JSONB, nullable=False)
+    requested_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    driver_name: Mapped[str | None] = mapped_column(Text)
+    driver_signature: Mapped[list | None] = mapped_column(JSONB)
+    shortage_note: Mapped[str | None] = mapped_column(Text)
+    voided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    void_reason: Mapped[str | None] = mapped_column(Text)
+    prev_hash: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[str | None] = mapped_column(Text)

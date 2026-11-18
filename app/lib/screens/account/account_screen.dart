@@ -5,7 +5,9 @@ import '../../api/api_client.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
+import '../admin/admin_dashboard_screen.dart' show rateMatrixScreen;
 import '../masterdata/master_data_screen.dart';
+import '../payments/payments_screens.dart';
 import '../team/users_screen.dart';
 import 'lr_settings_screen.dart';
 
@@ -23,64 +25,73 @@ class AccountScreen extends StatelessWidget {
     final text = Theme.of(context).textTheme;
 
     void open(Widget screen) => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
-    Widget tile(IconData icon, String label, VoidCallback onTap) => ListTile(
-          leading: Icon(icon, color: Palette.onSurfaceVariant),
-          title: Text(label, style: text.bodyLarge),
-          trailing: const Icon(Icons.chevron_right, color: Palette.onSurfaceMuted),
-          onTap: onTap,
-        );
+    final items = <(IconData, String, Widget)>[
+      (Icons.person_outline, 'Profile', ProfileScreen(user: user)),
+      (Icons.lock_outline, 'Password', const ChangePasswordScreen()),
+      (Icons.inventory_2_outlined, 'Master data', MasterDataScreen.masterData()),
+      if (user.canEditMasterData) (Icons.price_change_outlined, 'Rate matrix', rateMatrixScreen()),
+      if (user.canSeeMoney) (Icons.account_balance_wallet_outlined, 'Receivables', const ReceivablesScreen()),
+      if (user.isAdmin) (Icons.group_outlined, 'Team', const UsersScreen()),
+      if (user.isAdmin) (Icons.apartment_outlined, 'Company / LR header', const CompanyScreen()),
+      if (user.isAdmin) (Icons.tune, 'LR settings', const LrSettingsScreen()),
+    ];
 
     return Scaffold(
       appBar: AppBar(title: const Text('Account')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
         children: [
-          AppCard(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(user.name, style: text.titleMedium),
-                        const SizedBox(height: 4),
-                        Text(user.email, style: text.bodyMedium),
-                      ],
+          DarkPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(child: SectionLabel('Your workspace', onDark: true)),
+                    StatusChip(
+                      roleLabels[user.role]!,
+                      background: Palette.primary,
+                      foreground: Palette.onPrimary,
                     ),
-                  ),
-                  StatusChip(
-                    roleLabels[user.role]!,
-                    background: Palette.primaryContainer,
-                    foreground: Palette.onPrimaryContainer,
-                  ),
-                ],
-              ),
+                  ],
+                ),
+                Text(user.name, style: onInk(text.headlineMedium!)),
+                const SizedBox(height: 4),
+                Text(user.email, style: onInk(text.bodyMedium!, muted: true)),
+              ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          const SectionLabel('Manage'),
           AppCard(
             child: Column(
               children: [
-                tile(Icons.badge_outlined, 'Edit profile', () => open(ProfileScreen(user: user))),
-                const Divider(indent: 16, endIndent: 16),
-                tile(Icons.lock_outline, 'Change password', () => open(const ChangePasswordScreen())),
-                const Divider(indent: 16, endIndent: 16),
-                tile(Icons.inventory_2_outlined, 'Master data', () => open(const MasterDataScreen())),
-                if (user.isAdmin) ...[
-                  const Divider(indent: 16, endIndent: 16),
-                  tile(Icons.group_outlined, 'Team', () => open(const UsersScreen())),
-                  const Divider(indent: 16, endIndent: 16),
-                  tile(Icons.apartment_outlined, 'Company and LR header', () => open(const CompanyScreen())),
-                  const Divider(indent: 16, endIndent: 16),
-                  tile(Icons.receipt_long_outlined, 'LR settings', () => open(const LrSettingsScreen())),
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0) const Divider(indent: 58, endIndent: 18),
+                  ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
+                    leading: Icon(items[i].$1, color: Palette.onSurface),
+                    title: Text(items[i].$2, style: text.titleMedium),
+                    trailing: const Icon(Icons.chevron_right, color: Palette.onSurfaceMuted),
+                    onTap: () => open(items[i].$3),
+                  ),
                 ],
               ],
             ),
           ),
           const SizedBox(height: 24),
-          OutlinedButton(onPressed: session.logout, child: const Text('Sign out')),
+          OutlinedButton.icon(
+            onPressed: session.logout,
+            icon: const Icon(Icons.logout),
+            label: const Text('Sign out'),
+          ),
+          const SizedBox(height: 20),
+          Center(
+            child: Text(
+              'FreightFlow · Built to keep you moving',
+              style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted),
+            ),
+          ),
         ],
       ),
     );
@@ -120,7 +131,8 @@ class _ProfileScreenState extends State<ProfileScreen> with Submitter {
 
   @override
   Widget build(BuildContext context) => FormPage(
-        title: 'Edit profile',
+        title: 'Profile',
+        subtitle: 'How you appear to your team.',
         formKey: formKey,
         busy: busy,
         error: error,
@@ -178,7 +190,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> with Submit
 
   @override
   Widget build(BuildContext context) => FormPage(
-        title: 'Change password',
+        title: 'Password',
+        subtitle: 'Changing it signs out your other devices.',
         formKey: formKey,
         busy: busy,
         error: error,
@@ -287,6 +300,7 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
     }
     return FormPage(
       title: 'Company settings',
+      subtitle: 'Your identity on every printed receipt.',
       formKey: formKey,
       busy: busy,
       error: error,

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../api/api_client.dart';
 import '../../widgets/common.dart';
+import 'auth_scaffold.dart';
 
 /// Reset a forgotten password in two steps: ask for a code by email, then enter it with a new password.
 class ForgotPasswordScreen extends StatefulWidget {
@@ -48,58 +49,76 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with Submit
   }
 
   @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return FormPage(
-      title: 'Reset password',
-      formKey: formKey,
-      busy: busy,
-      error: error,
-      submitLabel: _codeSent ? 'Set new password' : 'Email me a code',
-      onSubmit: () => submit(_codeSent ? _reset : _sendCode),
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Text(
-            _codeSent
-                ? 'If that account exists, a 6-digit code is on its way to its email. It works once and '
-                    'expires in 15 minutes.'
-                : 'Enter the email or phone you sign in with. We will email a 6-digit code.',
-            style: text.bodyMedium,
+  Widget build(BuildContext context) => AuthScaffold(
+        title: 'Forgot password?',
+        subtitle: 'A secure way back to your workspace.',
+        children: [
+          if (_codeSent)
+            const AuthSent(
+              title: 'Check your inbox',
+              body: 'If an account matches, a 6-digit code is on its way. It works once and expires in '
+                  '15 minutes. Check your spam folder too.',
+            ),
+          AppCard(
+            padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+            child: Form(
+              key: formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (error != null) ...[ErrorBanner(error!), const SizedBox(height: 14)],
+                  AppTextField(
+                    label: 'Email or phone',
+                    controller: _login,
+                    mandatory: true,
+                    hint: 'you@company.com',
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.username, AutofillHints.email],
+                  ),
+                  if (_codeSent) ...[
+                    AppTextField(
+                      label: 'Code from the email',
+                      controller: _code,
+                      mandatory: true,
+                      hint: '6 digits',
+                      keyboardType: TextInputType.number,
+                      autofillHints: const [AutofillHints.oneTimeCode],
+                      check: (v) => RegExp(r'^[0-9]{6}$').hasMatch(v) ? null : 'The code has 6 digits',
+                    ),
+                    AppTextField(
+                      label: 'New password',
+                      controller: _password,
+                      mandatory: true,
+                      minLength: 8,
+                      hint: 'Create a strong password',
+                      helper: 'Use at least 8 characters.',
+                      obscure: true,
+                      autofillHints: const [AutofillHints.newPassword],
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  BusyButton(
+                    label: _codeSent ? 'Set new password' : 'Email me a code',
+                    busy: busy,
+                    onPressed: () => submit(_codeSent ? _reset : _sendCode),
+                  ),
+                  if (_codeSent)
+                    TextButton(
+                      onPressed: busy ? null : () => submit(_sendCode),
+                      child: const Text('Send another code'),
+                    ),
+                ],
+              ),
+            ),
           ),
-        ),
-        AppTextField(
-          label: 'Email or phone',
-          controller: _login,
-          mandatory: true,
-          keyboardType: TextInputType.emailAddress,
-          autofillHints: const [AutofillHints.username, AutofillHints.email],
-        ),
-        if (_codeSent) ...[
-          AppTextField(
-            label: 'Code from the email',
-            controller: _code,
-            mandatory: true,
-            keyboardType: TextInputType.number,
-            autofillHints: const [AutofillHints.oneTimeCode],
-            check: (v) => RegExp(r'^[0-9]{6}$').hasMatch(v) ? null : 'The code has 6 digits',
+          const AuthNote(
+            title: 'Confirm securely by email',
+            body: 'Your new password is applied only with the code sent to your email. Every other '
+                'device is signed out.',
           ),
-          AppTextField(
-            label: 'New password',
-            controller: _password,
-            mandatory: true,
-            minLength: 8,
-            obscure: true,
-            autofillHints: const [AutofillHints.newPassword],
-          ),
-          TextButton(
-            onPressed: busy ? null : () => submit(_sendCode),
-            child: const Text('Send another code'),
-          ),
+          AuthLink(lead: 'Remembered it?', action: 'Back to log in', onTap: () => Navigator.of(context).maybePop()),
         ],
-      ],
-    );
-  }
+      );
 }
 
 /// For someone who does not remember which email they signed up with.
@@ -130,48 +149,43 @@ class _RecoverEmailScreenState extends State<RecoverEmailScreen> with Submitter 
   }
 
   @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return FormPage(
-      title: 'Find my login email',
-      formKey: formKey,
-      busy: busy,
-      error: error,
-      submitLabel: 'Text it to my phone',
-      onSubmit: () => submit(_recover),
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Text(
-            'Enter the phone number on your account. Your login email is sent to that phone by SMS, '
-            'and is never shown here.',
-            style: text.bodyMedium,
-          ),
-        ),
-        AppTextField(
-          label: 'Phone number',
-          controller: _phone,
-          mandatory: true,
-          keyboardType: TextInputType.phone,
-          autofillHints: const [AutofillHints.telephoneNumber],
-          check: (v) =>
-              RegExp(r'^\+?[0-9]{10,13}$').hasMatch(v.replaceAll(RegExp(r'[\s-]'), '')) ? null : 'Enter 10 to 13 digits',
-        ),
-        if (_sentMessage != null)
+  Widget build(BuildContext context) => AuthScaffold(
+        title: 'Recover email',
+        subtitle: 'Find your workspace with your phone.',
+        children: [
+          if (_sentMessage != null) AuthSent(title: 'Check your phone', body: _sentMessage!),
           AppCard(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(_sentMessage!, style: text.bodyMedium),
+            padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+            child: Form(
+              key: formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (error != null) ...[ErrorBanner(error!), const SizedBox(height: 14)],
+                  AppTextField(
+                    label: 'Phone number',
+                    controller: _phone,
+                    mandatory: true,
+                    hint: '+91 phone number',
+                    helper: 'Use the phone number linked to your account.',
+                    keyboardType: TextInputType.phone,
+                    autofillHints: const [AutofillHints.telephoneNumber],
+                    check: (v) => RegExp(r'^\+?[0-9]{10,13}$').hasMatch(v.replaceAll(RegExp(r'[\s-]'), ''))
+                        ? null
+                        : 'Enter 10 to 13 digits',
+                  ),
+                  const SizedBox(height: 4),
+                  BusyButton(label: 'Text me my login email', busy: busy, onPressed: () => submit(_recover)),
+                ],
+              ),
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: Text(
-            'No phone on your account? Your company admin can see your login email under Team.',
-            style: text.bodyMedium,
+          const AuthNote(
+            title: 'Your account stays private.',
+            body: 'Account details are never shown here; they go only to the phone on the account. '
+                'No phone on your account? Your company admin can see your login email under Team.',
           ),
-        ),
-      ],
-    );
-  }
+          AuthLink(lead: 'Found it?', action: 'Back to log in', onTap: () => Navigator.of(context).maybePop()),
+        ],
+      );
 }

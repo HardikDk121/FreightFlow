@@ -10,6 +10,7 @@ from app.deps import current_user, require_roles
 from app.masterdata import schemas, service
 from app.masterdata.service import MasterDataService
 from app.models import Role, User
+from app.rates import schemas as rates
 
 _editor = require_roles(Role.ADMIN, Role.MANAGER)
 
@@ -68,4 +69,7 @@ routers = [
     _build("/parties", service.parties, schemas.PartyRead, schemas.PartyCreate, schemas.PartyUpdate),
     _build("/item-types", service.item_types, schemas.ItemTypeRead, schemas.ItemTypeCreate, schemas.ItemTypeUpdate),
     _build("/trucks", service.trucks, schemas.TruckRead, schemas.TruckCreate, schemas.TruckUpdate),
+    _build("/stations", service.stations, rates.StationRead, rates.StationCreate, rates.StationUpdate),
+    _build("/routes", service.routes, rates.RouteRead, rates.RouteCreate, rates.RouteUpdate),
+    _build("/rate-rules", service.rate_rules, rates.RateRuleRead, rates.RateRuleCreate, rates.RateRuleUpdate),
 ]

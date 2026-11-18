@@ -40,6 +40,9 @@ def test_pending_lists_waiting_goods_oldest_first(client, admin):
         ("SURAT", 2, 60, 3),
         ("DELHI", 1, 4, 2),
     ]
+    # every sample LR weighs 100 kg, whatever its package count
+    assert [g["weight_kg"] for g in groups] == ["200.00", "100.00"]
+    assert (surat[0]["weight_kg"], surat[0]["ewb_status"], surat[0]["freight_by"]) == ("100.00", "not_required", "ToPay")
 
 
 def test_plan_matches_the_proposals_worked_example(client, admin):
@@ -50,12 +53,14 @@ def test_plan_matches_the_proposals_worked_example(client, admin):
         _lr(client, h, days_ago=days_ago, packages=packages, item_type_id=_item(client, h, f"Item {days_ago}", dims, weight))
     unsized = _lr(client, h, days_ago=0, packages=5)
 
-    plan = client.post("/trips/plan", json={"truck_id": truck, "destination": "SURAT"}, headers=h)
+    plan = client.post("/trips/plan", json={"truck_id": truck, "stops": ["SURAT"]}, headers=h)
     assert plan.status_code == 200, plan.text
     body = plan.json()
-    assert [line["load"] for line in body["lines"]] == [40, 24, 50, 12]
-    assert (body["volume_used_pct"], body["payload_used_pct"]) == (85, 89)
-    assert [x["lr_number"] for x in body["unsized"]] == [unsized["lr_number"]]
+    # the four sized LRs fill the space exactly as in the proposal; the fifth has no package
+    # type, so it is fitted by weight alone (5 packages of 20 kg into the 320 kg left)
+    assert [line["load"] for line in body["lines"]] == [40, 24, 50, 12, 5]
+    assert (body["volume_used_pct"], body["payload_used_pct"]) == (85, 93)
+    assert [x["lr_number"] for x in body["weight_only"]] == [unsized["lr_number"]] and body["unsized"] == []
 
 
 def test_partial_dispatch_keeps_the_rest_pending(client, admin):
@@ -64,7 +69,7 @@ def test_partial_dispatch_keeps_the_rest_pending(client, admin):
     lr = _lr(client, h, packages=30)
     trip = client.post(
         "/trips",
-        json={"truck_id": truck, "destination": "Surat", "driver_name": "Ramesh", "lines": [{"lr_id": lr["id"], "packages": 12}]},
+        json={"truck_id": truck, "stops": ["Surat"], "driver_name": "Ramesh", "lines": [{"lr_id": lr["id"], "packages": 12}]},
         headers=h,
     )
     assert trip.status_code == 201, trip.text
@@ -73,11 +78,11 @@ def test_partial_dispatch_keeps_the_rest_pending(client, admin):
 
     second_truck = _truck(client, h, "GJ03AB0001")
     too_many = client.post(
-        "/trips", json={"truck_id": second_truck, "destination": "Surat", "lines": [{"lr_id": lr["id"], "packages": 19}]}, headers=h
+        "/trips", json={"truck_id": second_truck, "stops": ["Surat"], "lines": [{"lr_id": lr["id"], "packages": 19}]}, headers=h
     )
     assert too_many.status_code == 409 and "only 18" in too_many.json()["error"]["message"]
     rest = client.post(
-        "/trips", json={"truck_id": second_truck, "destination": "Surat", "lines": [{"lr_id": lr["id"], "packages": 18}]}, headers=h
+        "/trips", json={"truck_id": second_truck, "stops": ["Surat"], "lines": [{"lr_id": lr["id"], "packages": 18}]}, headers=h
     )
     assert rest.status_code == 201
     assert client.get("/pending/lrs", headers=h).json() == []
@@ -90,11 +95,11 @@ def test_truck_cannot_be_on_two_open_trips_and_delivery_frees_it(client, admin):
     truck = _truck(client, h)
     first, second = _lr(client, h, packages=5), _lr(client, h, packages=5)
     trip = client.post(
-        "/trips", json={"truck_id": truck, "destination": "Surat", "lines": [{"lr_id": first["id"], "packages": 5}]}, headers=h
+        "/trips", json={"truck_id": truck, "stops": ["Surat"], "lines": [{"lr_id": first["id"], "packages": 5}]}, headers=h
     ).json()
-    body = {"truck_id": truck, "destination": "Surat", "lines": [{"lr_id": second["id"], "packages": 5}]}
+    body = {"truck_id": truck, "stops": ["Surat"], "lines": [{"lr_id": second["id"], "packages": 5}]}
     busy = client.post("/trips", json=body, headers=h)
-    assert busy.status_code == 409 and "already out" in busy.json()["error"]["message"]
+    assert busy.status_code == 409 and "still on a trip" in busy.json()["error"]["message"]
     # the refused trip dispatched nothing
     assert client.get("/pending/lrs", headers=h).json()[0]["pending"] == 5
 
@@ -113,15 +118,15 @@ def test_dispatch_rules(client, admin):
     lr = _lr(client, h, packages=5)
     line = {"lr_id": lr["id"], "packages": 1}
     clerk = add_staff(client, admin, "clerk@shree.example", "clerk")
-    assert client.post("/trips", json={"truck_id": truck, "destination": "Surat", "lines": [line]}, headers=bearer(clerk)).status_code == 403
-    assert client.post("/trips", json={"truck_id": truck, "destination": "Surat", "lines": [line, line]}, headers=h).status_code == 422
-    assert client.post("/trips", json={"truck_id": truck, "destination": "Surat", "lines": []}, headers=h).status_code == 422
+    assert client.post("/trips", json={"truck_id": truck, "stops": ["Surat"], "lines": [line]}, headers=bearer(clerk)).status_code == 403
+    assert client.post("/trips", json={"truck_id": truck, "stops": ["Surat"], "lines": [line, line]}, headers=h).status_code == 422
+    assert client.post("/trips", json={"truck_id": truck, "stops": ["Surat"], "lines": []}, headers=h).status_code == 422
 
     other = register(client, "Other Transport", "o@o.example")
     other_truck = _truck(client, bearer(other))
     # another company's LR or truck is simply not found
-    assert client.post("/trips", json={"truck_id": other_truck, "destination": "Surat", "lines": [line]}, headers=h).status_code == 404
-    stolen = client.post("/trips", json={"truck_id": other_truck, "destination": "Surat", "lines": [line]}, headers=bearer(other))
+    assert client.post("/trips", json={"truck_id": other_truck, "stops": ["Surat"], "lines": [line]}, headers=h).status_code == 404
+    stolen = client.post("/trips", json={"truck_id": other_truck, "stops": ["Surat"], "lines": [line]}, headers=bearer(other))
     assert stolen.status_code == 404
     assert client.get("/pending", headers=bearer(other)).json() == []
     assert client.post("/lrs", json={**NEW_LR, "item_type_id": _item(client, h, "Mine", (1, 1, 1), 1)}, headers=bearer(other)).status_code == 404
@@ -132,7 +137,22 @@ def test_dashboard_counts(client, admin):
     truck = _truck(client, h)
     lr = _lr(client, h, packages=8)
     _lr(client, h, days_ago=2, packages=2, to_city="Delhi")
-    client.post("/trips", json={"truck_id": truck, "destination": "Surat", "lines": [{"lr_id": lr["id"], "packages": 3}]}, headers=h)
+    client.post("/trips", json={"truck_id": truck, "stops": ["Surat"], "lines": [{"lr_id": lr["id"], "packages": 3}]}, headers=h)
     board = client.get("/dashboard", headers=h).json()
     assert (board["lrs_today"], board["pending_packages"], board["pending_lrs"], board["trips_on_road"]) == (1, 7, 2, 1)
     assert [g["to_city"] for g in board["pending_by_destination"]] == ["DELHI", "SURAT"]
+
+
+def test_partly_dispatched_weight_and_date_filter(client, admin):
+    h = bearer(admin)
+    truck = _truck(client, h)
+    lr = _lr(client, h, packages=10, weight="500", days_ago=3)
+    _lr(client, h, packages=1, days_ago=10)
+    client.post("/trips", json={"truck_id": truck, "stops": ["Surat"], "lines": [{"lr_id": lr["id"], "packages": 4}]}, headers=h)
+    # 6 of 10 packages of a 500 kg LR are still waiting
+    waiting = {x["lr_number"]: x for x in client.get("/pending/lrs", headers=h).json()}
+    assert (waiting[lr["lr_number"]]["pending"], waiting[lr["lr_number"]]["weight_kg"]) == (6, "300.00")
+    day = str(today() - dt.timedelta(days=3))
+    assert [x["lr_number"] for x in client.get("/lrs", params={"date_from": day, "date_to": day}, headers=h).json()] == [lr["lr_number"]]
+    assert len(client.get("/lrs", params={"date_from": day}, headers=h).json()) == 1
+    assert len(client.get("/lrs", params={"date_to": day}, headers=h).json()) == 2

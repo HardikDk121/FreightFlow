@@ -5,9 +5,9 @@ import 'package:provider/provider.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
-import 'accept_invite_screen.dart';
+import 'auth_scaffold.dart';
 import 'forgot_password_screen.dart';
-import 'register_screen.dart';
+import 'join_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -38,82 +38,69 @@ class _LoginScreenState extends State<LoginScreen> with Submitter {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return Scaffold(
-      body: SafeArea(
-        child: Form(
-          key: formKey,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 56, 16, 16),
-            children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(color: Palette.primary, borderRadius: BorderRadius.circular(16)),
-                  child: const Icon(Icons.local_shipping_outlined, color: Palette.onPrimary, size: 28),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text('FreightFlow', style: text.headlineMedium),
-              const SizedBox(height: 8),
-              Text('Sign in to your transport office.', style: text.bodyMedium),
-              const SizedBox(height: 32),
-              if (error != null) ...[ErrorBanner(error!), const SizedBox(height: 16)],
-              AutofillGroup(
-                child: Column(
-                  children: [
-                    AppTextField(
-                      label: 'Email or phone',
-                      controller: _login,
-                      mandatory: true,
-                      keyboardType: TextInputType.emailAddress,
-                      autofillHints: const [AutofillHints.username, AutofillHints.email],
-                    ),
-                    AppTextField(
-                      label: 'Password',
-                      controller: _password,
-                      mandatory: true,
-                      obscure: true,
-                      autofillHints: const [AutofillHints.password],
-                    ),
-                  ],
-                ),
-              ),
-              FilledButton(
-                onPressed: busy ? null : () => submit(_signIn),
-                child: busy
-                    ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Sign in'),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return AuthScaffold(
+      title: 'Welcome back.',
+      subtitle: 'Your freight. Your team. One place.',
+      children: [
+        AppCard(
+          padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+          child: Form(
+            key: formKey,
+            child: AutofillGroup(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TextButton(
-                    onPressed: () => _open(ForgotPasswordScreen(login: _login.text.trim())),
-                    child: const Text('Forgot password?'),
+                  Text('Log in to your workspace', style: text.titleLarge!.copyWith(fontSize: 19)),
+                  const SizedBox(height: 18),
+                  if (error != null) ...[ErrorBanner(error!), const SizedBox(height: 14)],
+                  AppTextField(
+                    label: 'Email or phone',
+                    controller: _login,
+                    mandatory: true,
+                    hint: 'you@company.com',
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.username, AutofillHints.email],
                   ),
-                  TextButton(
-                    onPressed: () => _open(const RecoverEmailScreen()),
-                    child: const Text('Forgot email?'),
+                  AppTextField(
+                    label: 'Password',
+                    controller: _password,
+                    mandatory: true,
+                    hint: 'Enter your password',
+                    obscure: true,
+                    autofillHints: const [AutofillHints.password],
                   ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                      onPressed: () => _open(ForgotPasswordScreen(login: _login.text.trim())),
+                      child: const Text('Forgot password?'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  BusyButton(label: 'Log in', busy: busy, onPressed: () => submit(_signIn)),
                 ],
               ),
-              const SizedBox(height: 8),
-              const Divider(),
-              const SizedBox(height: 16),
-              OutlinedButton(
-                onPressed: () => _open(const RegisterScreen()),
-                child: const Text('Register a new company'),
-              ),
-              TextButton(
-                onPressed: () => _open(const AcceptInviteScreen()),
-                child: const Text('I have an invite code'),
-              ),
-            ],
+            ),
           ),
         ),
-      ),
+        AuthNote(
+          title: "Can't remember your email?",
+          body: 'Find your workspace with the phone number on your account.',
+          action: 'Recover email',
+          onAction: () => _open(const RecoverEmailScreen()),
+        ),
+        AuthLink(
+          lead: 'New to FreightFlow?',
+          action: 'Register or accept an invite',
+          onTap: () => _open(const JoinScreen()),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Secure access for your logistics team.',
+          style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted),
+        ),
+      ],
     );
   }
 }

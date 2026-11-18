@@ -12,7 +12,7 @@ from app.chat.schemas import ChatResponse
 from app.clock import today
 from app.dispatch import service as dispatch_service
 from app.dispatch.schemas import PendingLr
-from app.models import DispatchLine, Lr, Trip, Truck, User
+from app.models import Challan, DispatchLine, Lr, Trip, Truck, User
 
 # (answer, LR numbers used, questions worth asking next)
 Answer = tuple[str, list[str], list[str]]
@@ -131,19 +131,22 @@ def search_lrs(session: Session, party: str) -> Answer:
 def _trips_of(session: Session, lr: Lr) -> list[str]:
     """One line per trip that carried this LR: truck, driver, dates, packages."""
     rows = session.execute(
-        select(DispatchLine, Trip, Truck.vehicle_number)
+        select(DispatchLine, Trip, Truck.vehicle_number, Challan)
         .join(Trip, Trip.id == DispatchLine.trip_id)
         .join(Truck, Truck.id == Trip.truck_id)
+        .join(Challan, Challan.id == DispatchLine.challan_id)
         .where(DispatchLine.lr_id == lr.id)
         .order_by(Trip.dispatched_at)
     ).all()
     lines = []
-    for line, trip, vehicle in rows:
+    for line, trip, vehicle, challan in rows:
         driver = f", driver {trip.driver_name}" if trip.driver_name else ""
         delivered = f", delivered {line.delivered_at.strftime('%d-%m-%Y')}" if line.delivered_at else ", not yet delivered"
+        # Cargo added on the road is on a supplementary challan, issued where it was loaded.
+        added = f", added at {challan.loaded_at} on challan {challan.challan_number}" if challan.seq else f", challan {challan.challan_number}"
         lines.append(
             f"{line.packages} packages on truck {vehicle} to {trip.destination}{driver}, "
-            f"left {trip.dispatched_at.strftime('%d-%m-%Y')}{delivered}"
+            f"left {trip.dispatched_at.strftime('%d-%m-%Y')}{added}{delivered}"
         )
     return lines
 

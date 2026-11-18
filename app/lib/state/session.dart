@@ -41,6 +41,9 @@ class User {
 
   bool get canCancelLr => role == 'admin' || role == 'manager';
 
+  /// Receivables and other money views.
+  bool get canSeeMoney => role == 'admin' || role == 'manager';
+
   bool get canUndoDelivery => role == 'admin' || role == 'manager';
 
   bool get canDispatch => role == 'admin' || role == 'manager' || role == 'dispatcher';

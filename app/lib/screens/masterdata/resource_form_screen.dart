@@ -31,7 +31,7 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> with Submitter 
     final row = widget.row;
     _texts = {
       for (final f in widget.resource.fields)
-        if (f.kind == FieldKind.text || f.kind == FieldKind.decimal)
+        if (f.kind == FieldKind.text || f.kind == FieldKind.decimal || f.kind == FieldKind.list)
           f.key: TextEditingController(text: _initialText(row?[f.key])),
     };
     _dates = {
@@ -55,6 +55,7 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> with Submitter 
 
   static String _initialText(Object? value) => switch (value) {
         null => '',
+        final List<dynamic> items => items.join(', '),
         final num n => formatNumber(n),
         _ => value.toString(),
       };
@@ -65,6 +66,10 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> with Submitter 
           f.key: switch (f.kind) {
             FieldKind.toggle => _toggles[f.key],
             FieldKind.date => _dates[f.key],
+            FieldKind.list => [
+                for (final item in _texts[f.key]!.text.split(','))
+                  if (item.trim().isNotEmpty) item.trim(),
+              ],
             FieldKind.decimal => double.tryParse(_texts[f.key]!.text.trim()),
             FieldKind.text => _texts[f.key]!.text.trim().isEmpty ? null : _texts[f.key]!.text.trim(),
           },
@@ -87,30 +92,20 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> with Submitter 
   }
 
   Widget _dateField(FieldSpec f) {
-    final text = Theme.of(context).textTheme;
     final value = _dates[f.key];
     final expired = value != null && DateTime.parse(value).isBefore(DateUtils.dateOnly(DateTime.now()));
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(f.mandatory ? f.label : '${f.label} (optional)', style: text.labelMedium),
-          const SizedBox(height: 8),
-          AppCard(
-            child: ListTile(
-              title: Text(value == null ? 'Choose a date' : _dateLabel(value), style: text.bodyLarge),
-              subtitle: expired
-                  ? Text('This date has passed.', style: text.bodySmall!.copyWith(color: Palette.error))
-                  : null,
-              trailing: const Icon(Icons.calendar_today_outlined, color: Palette.onSurfaceVariant),
-              onTap: () => _pickDate(f),
-            ),
-          ),
-        ],
-      ),
+    return PickerField(
+      label: f.label,
+      mandatory: f.mandatory,
+      value: value == null ? null : _dateLabel(value),
+      placeholder: 'DD-MM-YYYY',
+      icon: Icons.calendar_today_outlined,
+      onTap: () => _pickDate(f),
+      note: expired ? 'This date has passed.' : null,
+      noteTone: Tone.danger,
     );
   }
+
 
   Future<void> _save() async {
     final missing = [
@@ -136,36 +131,67 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> with Submitter 
       formKey: formKey,
       busy: busy,
       error: error,
+      subtitle: widget.resource.intro,
       submitLabel: 'Save',
       onSubmit: () => submit(_save),
       children: [
-        for (final f in widget.resource.fields)
-          switch (f.kind) {
-            FieldKind.date => _dateField(f),
-            FieldKind.toggle => SwitchField(
-                label: f.label,
-                value: _toggles[f.key]!,
-                onChanged: (v) => setState(() => _toggles[f.key] = v),
-              ),
-            FieldKind.decimal => AppTextField(
-                label: f.label,
-                controller: _texts[f.key]!,
-                mandatory: f.mandatory,
-                check: f.check,
-                unit: f.unit,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-              ),
-            FieldKind.text => AppTextField(
-                label: f.label,
-                controller: _texts[f.key]!,
-                mandatory: f.mandatory,
-                check: f.check,
-                capitalization: f.capitals ? TextCapitalization.characters : TextCapitalization.words,
-              ),
-          },
+        for (final group in _rows())
+          group.length == 1
+              ? _input(group.single)
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < group.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 10),
+                      Expanded(child: _input(group[i])),
+                    ],
+                  ],
+                ),
         if (editing)
           SwitchField(label: 'Active', value: _active, onChanged: (v) => setState(() => _active = v)),
       ],
     );
   }
+
+  /// The fields, with neighbours that share a [FieldSpec.row] gathered onto one line.
+  List<List<FieldSpec>> _rows() {
+    final rows = <List<FieldSpec>>[];
+    for (final f in widget.resource.fields) {
+      if (f.row != null && rows.isNotEmpty && rows.last.first.row == f.row) {
+        rows.last.add(f);
+      } else {
+        rows.add([f]);
+      }
+    }
+    return rows;
+  }
+
+  Widget _input(FieldSpec f) => switch (f.kind) {
+        FieldKind.date => _dateField(f),
+        FieldKind.toggle => SwitchField(
+            label: f.label,
+            subtitle: f.helper,
+            value: _toggles[f.key]!,
+            onChanged: (v) => setState(() => _toggles[f.key] = v),
+          ),
+        FieldKind.decimal => AppTextField(
+            label: f.label,
+            controller: _texts[f.key]!,
+            mandatory: f.mandatory,
+            check: f.check,
+            unit: f.unit,
+            hint: f.hint,
+            helper: f.helper,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+          ),
+        FieldKind.text || FieldKind.list => AppTextField(
+            label: f.label,
+            controller: _texts[f.key]!,
+            mandatory: f.mandatory,
+            check: f.check,
+            hint: f.hint,
+            helper: f.helper,
+            capitalization: f.capitals ? TextCapitalization.characters : TextCapitalization.words,
+          ),
+      };
 }

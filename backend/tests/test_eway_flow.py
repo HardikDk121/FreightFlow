@@ -11,7 +11,7 @@ BIG = {"value": "80000", "distance_km": 900, "eway_bill_no": None}
 
 def _dispatch(client, h, truck, lr, packages):
     return client.post(
-        "/trips", json={"truck_id": truck, "destination": "Surat", "driver_name": "Ramesh", "lines": [{"lr_id": lr["id"], "packages": packages}]}, headers=h
+        "/trips", json={"truck_id": truck, "stops": ["Surat"], "driver_name": "Ramesh", "lines": [{"lr_id": lr["id"], "packages": packages}]}, headers=h
     )
 
 

@@ -21,11 +21,14 @@ The rest of this file covers the backend.
 | LR form helpers | `GET /lrs/defaults` (provisional number, from city, ST. charges), `GET /lrs/suggestions` (the consignor's last LR), `POST /lrs/print-preview` (PDF, nothing saved) |
 | LR settings | `GET /lrs/settings`, `PATCH /lrs/settings` (admin): number prefix and next number, from city, default ST. charges |
 | E-way bill | `GET /eway/states` (state codes and intra-state limits), `POST /eway/evaluate` (is a bill needed, why, who generates it, Part B, validity), `PATCH /lrs/{id}/eway-bill` (add the number after booking) |
+| Rate matrix | `/stations`, `/routes`, `/rate-rules` (list, get, create, update), `GET /rates/classes`, `POST /rates/quote` (freight with the working shown) |
+| Payments | `POST /lrs/{id}/payments`, `GET /lrs/{id}/account`, `GET /receivables` (by party), `GET /receivables/lrs?party=` |
 | Invoice scan | `POST /invoices/scan` (photo upload): reads consignor, consignee, GST numbers, city, goods, value and e-way bill number. Nothing is saved and the photo is not kept. |
 | Pending | `GET /pending` (by destination), `GET /pending/lrs?destination=&older_than_days=` (oldest first) |
-| Trips | `POST /trips/plan` (load suggestion), `POST /trips` (dispatch, partial loads allowed), `GET /trips`, `GET /trips/{id}`, `POST /trips/{id}/lines/{line_id}/deliver`, `POST /trips/{id}/lines/{line_id}/undo-delivery` (admin, manager), `GET /trips/{id}/load-sheet.pdf` |
+| Trips | `GET /trips/suggestions` (which truck for which route), `POST /trips/plan` (load for a truck and its stops), `POST /trips` (dispatch to one or more stops, partial loads allowed), `POST /trips/{id}/stops/{city}/deliver` (unload a whole stop), `GET /trips`, `GET /trips/{id}`, `POST /trips/{id}/lines/{line_id}/deliver`, `POST /trips/{id}/lines/{line_id}/undo-delivery` (admin, manager), `GET /trips/{id}/load-sheet.pdf` |
 | Chat | `POST /chat`: answers from nine read-only tools (LR details, pending, bookings by day, trucks, party search); understands typos, everyday words and follow-up questions; refuses anything that would change data; every question is audited |
-| Dashboard | `GET /dashboard` |
+| Cargo added on the road | `POST /trips/{id}/additions` (request), `GET /trips/{id}/challans`, `GET /challans/open`, `POST /challans/{id}/approve`, `/void`, `/sign` (driver sign-off, which issues and seals the challan) |
+| Dashboard | `GET /dashboard`, `GET /dashboard/admin` (owner: trucks, trips, freight, receivables, expiring e-way bills) |
 | Ops | `GET /health` |
 
 Interactive API docs are at `/docs` once the server is running.
@@ -87,6 +90,25 @@ the running backend.
 - **An LR that needs a bill cannot be dispatched without its number.** Dispatch is Part B: it records the
   vehicle and starts the validity clock (one day per 200 km). A truck whose insurance or fitness has
   expired cannot be dispatched either.
+- **Freight comes from the rate matrix**, priced by the pure functions in `app/rates/engine.py`.
+  Chargeable weight is packages x weight per package unless a total is given. A station belongs to a
+  zone (its base station) and adds its own surcharge per kg; a rate is set per class of goods per zone,
+  charged per kg, per package by weight slab, or per package flat.
+- **A trip has ordered stops.** Each LR must be for one of them. Delivering a stop leaves the trip open
+  while later stops have goods; the truck is free, and its location becomes the last stop, only when
+  everything is delivered.
+- **Truck suggestions** group pending LRs by saved route, give the longest-waiting group first pick, and
+  choose the smallest free truck that takes everything. It is a rule-based planner, not a trained model.
+- **Payments are insert-only**, cannot exceed the balance, and block cancelling the LR. Paid is due at
+  booking, to-pay at delivery, to-be-billed 30 days after booking (`BILLING_CREDIT_DAYS`).
+- **An issued challan is never edited.** Dispatch creates the trip's primary challan (CH-12). Cargo added
+  on the road is a supplementary challan on the same trip (CH-12/S1): requested by whoever is loading,
+  approved by the person who dispatched the trip (an admin, if that person asked for it), and issued
+  when the driver signs for what was counted on. Lines are written only at sign-off. The database role
+  the API runs as cannot change a challan's trip, number or requested lines, or a line's packages, and
+  each issued challan carries a hash chained to the one before it, so direct tampering shows as
+  `sealed: false`. Every request is re-checked at approval and at sign-off: stop order, pending
+  packages, e-way bills, and weight and space on every remaining leg.
 - **Adding a tenant table.** Add it to `TENANT_TABLES` in a new migration so it gets the policy and grants.
 
 ## Adjusting the printed LR
@@ -109,5 +131,6 @@ Restart the backend after editing.
 - Voice input for chat. A language model is optional and off until `FF_LLM_API_KEY` is set.
 - Ordered delivery stops and route planning (the journal's model plugs in here).
 - Generating e-way bills on the government portal (needs API access through a GSP).
-- Payments and receivables, the owner dashboard, and the scanner upgrade (next in line).
+- Payment receipts as PDF, trip expenses and profit per trip, a map of truck positions (no GPS feed).
+- Scanning PAN cards and multi-page documents; automatic cropping of the photo.
 - An SMS provider, godown locations.

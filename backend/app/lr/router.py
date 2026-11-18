@@ -139,12 +139,16 @@ def create_lr(body: LrFields, actor: User = Depends(_booker), session: Session =
 @router.get("", response_model=list[LrRead])
 def list_lrs(
     q: Annotated[str | None, Query(max_length=60)] = None,
+    date_from: dt.date | None = None,
+    date_to: dt.date | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     _: User = Depends(current_user),
     session: Session = Depends(get_session),
 ) -> list[LrRead]:
-    return [LrRead.model_validate(lr) for lr in service.search(session, q=q, limit=limit, offset=offset)]
+    """LRs, newest first. `date_from` and `date_to` filter on the booking date, both inclusive."""
+    lrs = service.search(session, q=q, limit=limit, offset=offset, date_from=date_from, date_to=date_to)
+    return [LrRead.model_validate(lr) for lr in lrs]
 
 
 @router.get("/{lr_id}", response_model=LrRead)

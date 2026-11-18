@@ -10,27 +10,55 @@ import '../../widgets/common.dart';
 import 'resource.dart';
 import 'resource_form_screen.dart';
 
-class MasterDataScreen extends StatelessWidget {
-  const MasterDataScreen({super.key});
+/// Tabs of add-and-edit lists. Used for master data and for the rate matrix.
+class MasterDataScreen extends StatefulWidget {
+  const MasterDataScreen({super.key, required this.title, required this.intro, required this.resources});
 
-  static final _resources = [parties, itemTypes, trucks];
+  /// Parties, item types and trucks.
+  MasterDataScreen.masterData({super.key})
+      : title = 'Master data',
+        intro = 'Your people, goods and fleet. One place.',
+        resources = [parties, itemTypes, trucks];
+
+  final String title;
+  final String intro;
+  final List<Resource> resources;
 
   @override
-  Widget build(BuildContext context) => DefaultTabController(
-        length: _resources.length,
-        child: Scaffold(
-          appBar: AppBar(
-            title: const Text('Master data'),
-            bottom: TabBar(
-              labelColor: Palette.primary,
-              unselectedLabelColor: Palette.onSurfaceMuted,
-              indicatorColor: Palette.primary,
-              dividerColor: Palette.outline,
-              labelStyle: Theme.of(context).textTheme.labelMedium,
-              tabs: [for (final r in _resources) Tab(text: r.plural)],
+  State<MasterDataScreen> createState() => _MasterDataScreenState();
+}
+
+class _MasterDataScreenState extends State<MasterDataScreen> {
+  int _tab = 0;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(widget.title)),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  PageIntro(widget.intro),
+                  Segmented<int>(
+                    options: {for (var i = 0; i < widget.resources.length; i++) i: widget.resources[i].plural},
+                    value: _tab,
+                    onChanged: (i) => setState(() => _tab = i),
+                  ),
+                ],
+              ),
             ),
-          ),
-          body: TabBarView(children: [for (final r in _resources) ResourceList(resource: r)]),
+            Expanded(
+              // Every tab stays alive, so switching back keeps its search and scroll position.
+              child: IndexedStack(
+                index: _tab,
+                children: [for (final r in widget.resources) ResourceList(resource: r)],
+              ),
+            ),
+          ],
         ),
       );
 }
@@ -98,7 +126,10 @@ class _ResourceListState extends State<ResourceList> with AutomaticKeepAliveClie
 
   Future<void> _openForm([JsonRow? row]) async {
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => ResourceFormScreen(resource: widget.resource, row: row)),
+      MaterialPageRoute(
+        builder: (_) =>
+            widget.resource.customForm?.call(row) ?? ResourceFormScreen(resource: widget.resource, row: row),
+      ),
     );
     if (saved == true && mounted) await _load();
   }
@@ -107,19 +138,17 @@ class _ResourceListState extends State<ResourceList> with AutomaticKeepAliveClie
   Widget build(BuildContext context) {
     super.build(context);
     final canEdit = context.select<Session, bool>((s) => s.user?.canEditMasterData ?? false);
+    final text = Theme.of(context).textTheme;
     return Scaffold(
-      floatingActionButton: canEdit
-          ? FloatingActionButton.extended(
-              heroTag: widget.resource.path,
-              onPressed: _openForm,
-              icon: const Icon(Icons.add),
-              label: Text('Add ${widget.resource.singular}'),
+      bottomNavigationBar: canEdit
+          ? BottomBar(
+              children: [BusyButton(icon: Icons.add, label: 'Add ${widget.resource.singular}', onPressed: _openForm)],
             )
           : null,
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
             child: TextField(
               controller: _search,
               onChanged: _onSearchChanged,
@@ -127,19 +156,23 @@ class _ResourceListState extends State<ResourceList> with AutomaticKeepAliveClie
               decoration: InputDecoration(
                 hintText: 'Search ${widget.resource.plural.toLowerCase()}',
                 prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: BorderSide.none),
+                enabledBorder:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: BorderSide.none),
               ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Align(
               alignment: Alignment.centerLeft,
               child: FilterChip(
                 label: const Text('Show inactive'),
                 selected: _includeInactive,
-                shape: const StadiumBorder(side: BorderSide(color: Palette.outline)),
+                labelStyle: text.labelMedium!.copyWith(color: _includeInactive ? Palette.onInk : Palette.onSurface),
+                side: BorderSide.none,
                 backgroundColor: Palette.surface,
-                selectedColor: Palette.primaryContainer,
+                selectedColor: Palette.ink,
                 onSelected: (value) {
                   _includeInactive = value;
                   _load();
@@ -147,6 +180,7 @@ class _ResourceListState extends State<ResourceList> with AutomaticKeepAliveClie
               ),
             ),
           ),
+          const SizedBox(height: 8),
           Expanded(child: _body(canEdit)),
         ],
       ),
@@ -166,32 +200,51 @@ class _ResourceListState extends State<ResourceList> with AutomaticKeepAliveClie
     final rows = _rows;
     if (rows == null) return const SkeletonList();
     if (rows.isEmpty) {
-      return MessageView(
-        icon: Icons.inbox_outlined,
-        title: 'No ${widget.resource.plural.toLowerCase()} yet',
-        body: canEdit ? 'Add the first one with the button below.' : 'An admin or manager can add them.',
+      final plural = widget.resource.plural.toLowerCase();
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        children: [
+          MessageView(
+            card: true,
+            icon: widget.resource.icon,
+            title: _search.text.trim().isEmpty ? 'No $plural yet' : 'No matching $plural',
+            body: canEdit
+                ? 'Add your first ${widget.resource.singular} with the button below.'
+                : 'An admin or manager can add them.',
+          ),
+        ],
       );
     }
     final text = Theme.of(context).textTheme;
-    final status = StatusColors.of(context);
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         itemCount: rows.length,
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (_, i) {
           final row = rows[i];
           final subtitle = widget.resource.subtitle(row);
           return AppCard(
-            child: ListTile(
-              minVerticalPadding: 16,
-              title: Text(row[widget.resource.titleKey] as String, style: text.titleMedium),
-              subtitle: subtitle.isEmpty ? null : Text(subtitle, style: text.bodyMedium),
-              trailing: row['is_active'] as bool
-                  ? null
-                  : StatusChip('Inactive', background: Palette.background, foreground: status.muted),
-              onTap: canEdit ? () => _openForm(row) : null,
+            onTap: canEdit ? () => _openForm(row) : null,
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(row[widget.resource.titleKey] as String, style: text.titleMedium),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(subtitle, style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted)),
+                      ],
+                    ],
+                  ),
+                ),
+                if (!(row['is_active'] as bool)) StatusChip.tone('Inactive', Tone.neutral),
+                if (canEdit) const Icon(Icons.chevron_right, color: Palette.onSurfaceMuted),
+              ],
             ),
           );
         },

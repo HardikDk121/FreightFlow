@@ -1,13 +1,21 @@
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.deps import current_user, require_roles
 from app.dispatch import service
-from app.dispatch.schemas import DispatchRequest, PendingDestination, PendingLr, PlanRead, PlanRequest, TripRead
+from app.dispatch.schemas import (
+    DispatchRequest,
+    PendingDestination,
+    PendingLr,
+    PlanRead,
+    PlanRequest,
+    Suggestion,
+    TripRead,
+)
 from app.models import Company, Role, User
 from app.reports.pdf import build_table_report
 
@@ -24,7 +32,7 @@ def pending_destinations(
 
 @router.get("/pending/lrs", response_model=list[PendingLr])
 def pending_lrs(
-    destination: Annotated[str | None, Query(max_length=30)] = None,
+    destination: Annotated[str | None, Query(max_length=400, description="One city, or several separated by commas.")] = None,
     older_than_days: Annotated[int | None, Query(ge=0, le=3650)] = None,
     _: User = Depends(current_user),
     session: Session = Depends(get_session),
@@ -36,8 +44,14 @@ def pending_lrs(
 def plan_trip(
     body: PlanRequest, _: User = Depends(_dispatcher), session: Session = Depends(get_session)
 ) -> PlanRead:
-    """Suggest what to load for a destination, oldest first, within the truck's space and payload."""
-    return service.plan(session, body.truck_id, body.destination)
+    """Suggest what to load for the trip's stops, oldest first, within the truck's space and payload."""
+    return service.plan(session, body.truck_id, body.stops)
+
+
+@router.get("/trips/suggestions", response_model=list[Suggestion])
+def trip_suggestions(_: User = Depends(_dispatcher), session: Session = Depends(get_session)) -> list[Suggestion]:
+    """Which free truck to send on which route, with the load for each. Advice only."""
+    return service.suggestions(session)
 
 
 @router.post("/trips", response_model=TripRead, status_code=status.HTTP_201_CREATED)
@@ -75,6 +89,18 @@ def deliver_line(
     return service.deliver(session, actor, trip_id, line_id)
 
 
+@router.post("/trips/{trip_id}/stops/{city}/deliver", response_model=TripRead)
+def deliver_stop(
+    trip_id: uuid.UUID,
+    city: Annotated[str, Path(max_length=30)],
+    actor: User = Depends(_dispatcher),
+    session: Session = Depends(get_session),
+) -> TripRead:
+    """The truck has unloaded at this stop: mark every LR for it delivered. The trip stays open
+    while later stops still have goods."""
+    return service.deliver_stop(session, actor, trip_id, city)
+
+
 @router.post("/trips/{trip_id}/lines/{line_id}/undo-delivery", response_model=TripRead)
 def undo_delivery(
     trip_id: uuid.UUID,
@@ -102,13 +128,13 @@ def trip_load_sheet(
     pdf = build_table_report(
         company_name=session.get_one(Company, user.company_id).name.upper(),
         title="LOAD SHEET",
-        subtitle=f"{trip.vehicle_number} to {trip.destination} · {trip.dispatched_at.strftime('%d-%m-%Y')}",
-        columns=[("#", 8), ("LR No", 24), ("Consignor", 38), ("Consignee", 38), ("Goods", 34), ("Pkgs", 12), ("To collect", 26)],
+        subtitle=f"{trip.vehicle_number} to {' > '.join(s.city for s in trip.stops)} · {trip.dispatched_at.strftime('%d-%m-%Y')}",
+        columns=[("#", 7), ("Stop", 22), ("Challan", 20), ("LR No", 20), ("Consignor", 28), ("Consignee", 28), ("Goods", 22), ("Pkgs", 10), ("To collect", 23)],
         rows=[
-            [str(n), r.lr_number, r.consignor_name, r.consignee_name, r.goods_description, str(r.packages), r.to_collect]
+            [str(n), r.to_city, r.challan_number, r.lr_number, r.consignor_name, r.consignee_name, r.goods_description, str(r.packages), r.to_collect]
             for n, r in enumerate(rows, start=1)
         ],
-        totals=["", f"{len(rows)} LRs", "", "", "", str(sum(r.packages for r in rows)), ""],
+        totals=["", "", "", f"{len(rows)} LRs", "", "", "", str(sum(r.packages for r in rows)), ""],
         notes=[
             f"Driver: {driver or '________________________'}",
             "Loaded by: ________________________        Received by: ________________________",

@@ -148,6 +148,7 @@ class TruckUpdate(PatchModel):
     model_year: ModelYear | None = None
     insurance_expiry: dt.date | None = None
     fitness_expiry: dt.date | None = None
+    current_station: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=30)] | None = None
     is_active: bool | None = None
 
 
@@ -162,3 +163,4 @@ class TruckRead(_Read):
     model_year: int | None
     insurance_expiry: dt.date | None
     fitness_expiry: dt.date | None
+    current_station: str | None

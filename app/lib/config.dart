@@ -6,4 +6,4 @@ const _override = String.fromEnvironment('API_BASE_URL');
 ///   flutter run --dart-define=API_BASE_URL=https://api.example.com
 /// Without it, the app targets a backend on the development machine: the Android
 /// emulator reaches the host at 10.0.2.2, the iOS simulator at localhost.
-final String apiBaseUrl ='https://freightflow-dev.duckdns.org';
+final String apiBaseUrl = 'freightflow-dev.duckdns.org';

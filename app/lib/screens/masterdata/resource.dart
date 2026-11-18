@@ -1,7 +1,9 @@
+import 'package:flutter/material.dart';
+
 /// One row as the API returns it.
 typedef JsonRow = Map<String, dynamic>;
 
-enum FieldKind { text, decimal, toggle, date }
+enum FieldKind { text, decimal, toggle, date, list }
 
 /// One editable field of a master-data resource. [key] is the JSON key the API uses.
 class FieldSpec {
@@ -16,7 +18,19 @@ class FieldSpec {
     this.pattern,
     this.patternHint,
     this.unit,
+    this.row,
+    this.hint,
+    this.helper,
   });
+
+  /// Fields next to each other with the same [row] share one line on the form.
+  final String? row;
+
+  /// Placeholder while empty, such as "e.g. GJ03CW0620".
+  final String? hint;
+
+  /// A line under the field, or under a switch's title.
+  final String? helper;
 
   final String key;
   final String label;
@@ -63,7 +77,16 @@ class Resource {
     required this.titleKey,
     required this.subtitle,
     required this.fields,
+    required this.icon,
+    required this.intro,
+    this.customForm,
   });
+
+  /// Shown on the empty list and beside the form's heading.
+  final IconData icon;
+
+  /// One line under the add/edit form's title.
+  final String intro;
 
   final String path;
   final String singular;
@@ -71,6 +94,10 @@ class Resource {
   final String titleKey;
   final String Function(JsonRow row) subtitle;
   final List<FieldSpec> fields;
+
+  /// A purpose-built add/edit screen, for a resource the generic form cannot express.
+  /// It must pop with `true` after a save, like the generic form.
+  final Widget Function(JsonRow? row)? customForm;
 }
 
 /// 60.0 -> "60", 61.5 -> "61.5".
@@ -83,6 +110,8 @@ String _size(JsonRow row, String prefix) =>
 const _gstinPattern = r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$';
 
 final parties = Resource(
+  icon: Icons.groups_outlined,
+  intro: 'Save a customer, sender or consignee.',
   path: '/parties',
   singular: 'party',
   plural: 'Parties',
@@ -97,14 +126,25 @@ final parties = Resource(
       capitals: true,
       pattern: _gstinPattern,
       patternHint: 'A GST number has 15 characters, like 24AABCR4141H1ZQ',
+      helper: '15-character GST identification number',
     ),
     FieldSpec('phone', 'Phone', pattern: r'^\+?[0-9]{10,13}$', patternHint: 'Enter 10 to 13 digits'),
-    FieldSpec('latitude', 'Latitude', kind: FieldKind.decimal, min: -90, max: 90),
-    FieldSpec('longitude', 'Longitude', kind: FieldKind.decimal, min: -180, max: 180),
+    FieldSpec('latitude', 'Latitude', kind: FieldKind.decimal, min: -90, max: 90, row: 'location'),
+    FieldSpec(
+      'longitude',
+      'Longitude',
+      kind: FieldKind.decimal,
+      min: -180,
+      max: 180,
+      row: 'location',
+      helper: 'Coordinates help with route planning.',
+    ),
   ],
 );
 
 final itemTypes = Resource(
+  icon: Icons.inventory_2_outlined,
+  intro: 'Standardise your packages for better loads. Sizes in centimetres.',
   path: '/item-types',
   singular: 'item type',
   plural: 'Item types',
@@ -112,9 +152,9 @@ final itemTypes = Resource(
   subtitle: (row) => '${_size(row, '')} · ${formatNumber(row['unit_weight_kg'] as num)} kg',
   fields: const [
     FieldSpec('name', 'Name', mandatory: true),
-    FieldSpec('length_cm', 'Length', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm'),
-    FieldSpec('width_cm', 'Width', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm'),
-    FieldSpec('height_cm', 'Height', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm'),
+    FieldSpec('length_cm', 'Length', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm', row: 'size'),
+    FieldSpec('width_cm', 'Width', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm', row: 'size'),
+    FieldSpec('height_cm', 'Height', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm', row: 'size'),
     FieldSpec(
       'unit_weight_kg',
       'Weight of one unit',
@@ -124,11 +164,13 @@ final itemTypes = Resource(
       max: 5000,
       unit: 'kg',
     ),
-    FieldSpec('stackable', 'Can be stacked', kind: FieldKind.toggle),
+    FieldSpec('stackable', 'Can be stacked', kind: FieldKind.toggle, helper: 'Allow items above this package.'),
   ],
 );
 
 final trucks = Resource(
+  icon: Icons.local_shipping_outlined,
+  intro: 'Dimensions, capacity and compliance. Certificates are checked before dispatch.',
   path: '/trucks',
   singular: 'truck',
   plural: 'Trucks',
@@ -146,30 +188,48 @@ final trucks = Resource(
       capitals: true,
       pattern: r'^([A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}|[0-9]{2}BH[0-9]{4}[A-Z]{1,2})$',
       patternHint: 'Enter a registration number like GJ03CW0620',
+      hint: 'e.g. GJ03CW0620',
     ),
-    FieldSpec('label', 'Label'),
-    FieldSpec(
-      'inner_length_cm',
-      'Inner length',
-      kind: FieldKind.decimal,
-      mandatory: true,
-      min: 100,
-      max: 2000,
-      unit: 'cm',
-    ),
-    FieldSpec('inner_width_cm', 'Inner width', kind: FieldKind.decimal, mandatory: true, min: 100, max: 300, unit: 'cm'),
-    FieldSpec(
-      'inner_height_cm',
-      'Inner height',
-      kind: FieldKind.decimal,
-      mandatory: true,
-      min: 100,
-      max: 450,
-      unit: 'cm',
-    ),
-    FieldSpec('payload_kg', 'Payload', kind: FieldKind.decimal, mandatory: true, min: 100, max: 60000, unit: 'kg'),
-    FieldSpec('model_year', 'Model year', kind: FieldKind.decimal, mandatory: true, min: 1990, max: 2100),
-    FieldSpec('insurance_expiry', 'Insurance valid until', kind: FieldKind.date, mandatory: true),
-    FieldSpec('fitness_expiry', 'Fitness certificate valid until', kind: FieldKind.date, mandatory: true),
+    FieldSpec('label', 'Label', hint: 'e.g. Long haul'),
+    FieldSpec('inner_length_cm', 'Inner L', kind: FieldKind.decimal, mandatory: true, min: 100, max: 2000, unit: 'cm', row: 'inner'),
+    FieldSpec('inner_width_cm', 'Inner W', kind: FieldKind.decimal, mandatory: true, min: 100, max: 300, unit: 'cm', row: 'inner'),
+    FieldSpec('inner_height_cm', 'Inner H', kind: FieldKind.decimal, mandatory: true, min: 100, max: 450, unit: 'cm', row: 'inner'),
+    FieldSpec('payload_kg', 'Payload', kind: FieldKind.decimal, mandatory: true, min: 100, max: 60000, unit: 'kg', row: 'capacity'),
+    FieldSpec('model_year', 'Model year', kind: FieldKind.decimal, mandatory: true, min: 1990, max: 2100, row: 'capacity'),
+    FieldSpec('insurance_expiry', 'Insurance expiry', kind: FieldKind.date, mandatory: true, row: 'papers'),
+    FieldSpec('fitness_expiry', 'Fitness expiry', kind: FieldKind.date, mandatory: true, row: 'papers'),
+    FieldSpec('current_station', 'Standing at', capitals: true),
+  ],
+);
+
+final stations = Resource(
+  icon: Icons.place_outlined,
+  intro: 'A delivery station, the base station whose rates it uses, and its extra per kg.',
+  path: '/stations',
+  singular: 'station',
+  plural: 'Stations',
+  titleKey: 'name',
+  subtitle: (row) {
+    final extra = row['surcharge_per_kg'] as num;
+    return '${row['zone']} rates${extra > 0 ? ' + Rs ${formatNumber(extra)} per kg' : ''}';
+  },
+  fields: const [
+    FieldSpec('name', 'Station', mandatory: true, capitals: true),
+    FieldSpec('zone', 'Uses the rates of (base station)', mandatory: true, capitals: true),
+    FieldSpec('surcharge_per_kg', 'Extra per kg over the base', kind: FieldKind.decimal, min: 0, max: 1000, unit: 'Rs'),
+  ],
+);
+
+final routes = Resource(
+  icon: Icons.route_outlined,
+  intro: 'Stations one truck serves in a single run, in order.',
+  path: '/routes',
+  singular: 'route',
+  plural: 'Routes',
+  titleKey: 'name',
+  subtitle: (row) => (row['stops'] as List).join(' → '),
+  fields: const [
+    FieldSpec('name', 'Route name', mandatory: true),
+    FieldSpec('stops', 'Stops in order, separated by commas', kind: FieldKind.list, mandatory: true, capitals: true),
   ],
 );

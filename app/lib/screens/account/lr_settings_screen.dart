@@ -78,6 +78,7 @@ class _LrSettingsScreenState extends State<LrSettingsScreen> with Submitter {
     }
     return FormPage(
       title: 'LR settings',
+      subtitle: 'Receipt numbering and booking defaults.',
       formKey: formKey,
       busy: busy,
       error: error,

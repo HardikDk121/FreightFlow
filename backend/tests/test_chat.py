@@ -57,7 +57,7 @@ def test_answers_match_the_database(client, admin):
     old = _lr(client, h, days_ago=5, packages=50)
     new = _lr(client, h, days_ago=0, packages=10)
     truck = _truck(client, h)
-    client.post("/trips", json={"truck_id": truck, "destination": "Surat", "lines": [{"lr_id": old["id"], "packages": 20}]}, headers=h)
+    client.post("/trips", json={"truck_id": truck, "stops": ["Surat"], "lines": [{"lr_id": old["id"], "packages": 20}]}, headers=h)
 
     pending = _ask(client, admin, "What is pending for Surat?")
     assert pending["tool"] == "pending_by_destination"

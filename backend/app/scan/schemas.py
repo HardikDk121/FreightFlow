@@ -15,3 +15,4 @@ class InvoiceScan(BaseModel):
     goods_description: str | None = None
     value: Decimal | None = None
     eway_bill_no: str | None = None
+    hsn_code: str | None = None

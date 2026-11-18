@@ -9,7 +9,7 @@ from app import audit
 from app.errors import AppError, conflict, not_found
 from app.eway.rules import Consignment, Requirement, evaluate
 from app.lr.schemas import LrDefaults, LrFields, LrSettingsUpdate, LrSuggestions, PartySuggestion
-from app.models import DispatchLine, ItemType, Lr, LrSettings, Party, User
+from app.models import DispatchLine, ItemType, Lr, LrSettings, Party, Payment, RateRule, User
 from app.security import utcnow
 
 
@@ -20,6 +20,15 @@ def _settings(session: Session, company_id: uuid.UUID, *, for_update: bool = Fal
     if for_update:
         query = query.with_for_update()
     return session.scalars(query).one()
+
+
+def take_trip_number(session: Session, company_id: uuid.UUID) -> int:
+    """The next trip number for this company. The settings row lock makes concurrent dispatches
+    take turns, and a failed dispatch rolls the counter back."""
+    settings = _settings(session, company_id, for_update=True)
+    number = settings.next_trip_number
+    settings.next_trip_number = number + 1
+    return number
 
 
 def get_settings(session: Session, user: User) -> LrSettings:
@@ -84,6 +93,8 @@ def create(session: Session, actor: User, data: LrFields) -> Lr:
     # A foreign key is checked outside row-level security, so confirm the item type is this company's.
     if data.item_type_id is not None and session.get(ItemType, data.item_type_id) is None:
         raise not_found("Item type")
+    if data.rate_rule_id is not None and session.get(RateRule, data.rate_rule_id) is None:
+        raise not_found("Rate")
     requirement = evaluate(
         Consignment(
             value=data.value,
@@ -163,8 +174,20 @@ def set_eway_bill(session: Session, actor: User, lr_id: uuid.UUID, eway_bill_no:
     return lr
 
 
-def search(session: Session, *, q: str | None, limit: int, offset: int) -> list[Lr]:
+def search(
+    session: Session,
+    *,
+    q: str | None,
+    limit: int,
+    offset: int,
+    date_from: dt.date | None = None,
+    date_to: dt.date | None = None,
+) -> list[Lr]:
     query = select(Lr).order_by(Lr.created_at.desc()).limit(limit).offset(offset)
+    if date_from is not None:
+        query = query.where(Lr.lr_date >= date_from)
+    if date_to is not None:
+        query = query.where(Lr.lr_date <= date_to)
     if q:
         query = query.where(
             or_(
@@ -189,6 +212,8 @@ def cancel(session: Session, actor: User, lr_id: uuid.UUID, reason: str) -> Lr:
         raise conflict("This LR is already cancelled.")
     if session.scalar(select(DispatchLine.id).where(DispatchLine.lr_id == lr.id).limit(1)) is not None:
         raise conflict("This LR has already been dispatched, so it cannot be cancelled.")
+    if session.scalar(select(Payment.id).where(Payment.lr_id == lr.id).limit(1)) is not None:
+        raise conflict("Money has been received against this LR, so it cannot be cancelled.")
     lr.status = "cancelled"
     lr.cancelled_by = actor.id
     lr.cancelled_at = utcnow()

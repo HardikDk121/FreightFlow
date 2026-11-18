@@ -49,11 +49,10 @@ class _UsersScreenState extends State<UsersScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Team')),
-        floatingActionButton: FloatingActionButton.extended(
-          heroTag: 'invite',
-          onPressed: () => _open(const InviteScreen()),
-          icon: const Icon(Icons.person_add_alt),
-          label: const Text('Invite'),
+        bottomNavigationBar: BottomBar(
+          children: [
+            BusyButton(icon: Icons.person_add_alt, label: 'Invite staff', onPressed: () => _open(const InviteScreen())),
+          ],
         ),
         body: _body(),
       );
@@ -71,28 +70,42 @@ class _UsersScreenState extends State<UsersScreen> {
     final users = _users;
     if (users == null) return const SkeletonList();
     final text = Theme.of(context).textTheme;
-    final status = StatusColors.of(context);
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-        itemCount: users.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        itemCount: users.length + 1,
+        separatorBuilder: (_, i) => SizedBox(height: i == 0 ? 0 : 12),
         itemBuilder: (_, i) {
-          final user = users[i];
+          if (i == 0) return const PageIntro('Everyone who can sign in to this company, and what they can do.');
+          final user = users[i - 1];
           return AppCard(
-            child: ListTile(
-              minVerticalPadding: 16,
-              title: Text(user.name, style: text.titleMedium),
-              subtitle: Text(user.email, style: text.bodyMedium),
-              trailing: user.isActive
-                  ? StatusChip(
-                      roleLabels[user.role]!,
-                      background: Palette.primaryContainer,
-                      foreground: Palette.onPrimaryContainer,
-                    )
-                  : StatusChip('Inactive', background: Palette.background, foreground: status.muted),
-              onTap: () => _open(UserEditScreen(user: user)),
+            onTap: () => _open(UserEditScreen(user: user)),
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: user.isActive ? Palette.ink : Palette.disabled,
+                  child: Text(
+                    user.name.isEmpty ? '?' : user.name[0].toUpperCase(),
+                    style: text.titleMedium!.copyWith(color: user.isActive ? Palette.onInk : Palette.onDisabled),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(user.name, style: text.titleMedium),
+                      Text(user.email, style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted)),
+                    ],
+                  ),
+                ),
+                user.isActive
+                    ? StatusChip.tone(roleLabels[user.role]!, Tone.info)
+                    : StatusChip.tone('Inactive', Tone.neutral),
+              ],
             ),
           );
         },
@@ -157,6 +170,7 @@ class _InviteScreenState extends State<InviteScreen> with Submitter {
   @override
   Widget build(BuildContext context) => FormPage(
         title: 'Invite staff',
+        subtitle: 'They join with the code you share, in the role you choose.',
         formKey: formKey,
         busy: busy,
         error: error,

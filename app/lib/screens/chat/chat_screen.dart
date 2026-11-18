@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../../api/api_client.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/common.dart';
+import '../shell.dart';
 
 class _Message {
   const _Message(this.text, {required this.mine, this.lrNumbers = const [], this.failed = false});
@@ -86,45 +88,52 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _bubble(_Message message) {
     final text = Theme.of(context).textTheme;
-    final color = message.failed
-        ? Palette.errorContainer
-        : message.mine
-            ? Palette.primary
-            : Palette.surface;
+    if (message.mine) {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12, left: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          decoration: BoxDecoration(color: Palette.ink, borderRadius: BorderRadius.circular(22)),
+          child: SelectableText(message.text, style: onInk(text.bodyMedium!)),
+        ),
+      );
+    }
     return Align(
-      alignment: message.mine ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.84),
+        margin: const EdgeInsets.only(bottom: 12, right: 32),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(message.mine ? 18 : 4),
-            bottomRight: Radius.circular(message.mine ? 4 : 18),
-          ),
-          border: message.mine || message.failed ? null : Border.all(color: Palette.outline),
+          color: message.failed ? Palette.errorContainer : Palette.surface,
+          borderRadius: BorderRadius.circular(22),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SelectableText(
-              message.text,
-              style: text.bodyLarge!.copyWith(
-                color: message.mine
-                    ? Palette.onPrimary
-                    : message.failed
-                        ? Palette.error
-                        : Palette.onSurface,
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: message.failed ? Palette.error : Palette.primary,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                message.failed ? Icons.error_outline : Icons.auto_awesome,
+                size: 18,
+                color: message.failed ? Palette.onInk : Palette.onPrimary,
               ),
             ),
+            const SizedBox(height: 10),
+            SelectableText(
+              message.text,
+              style: text.bodyMedium!.copyWith(color: message.failed ? Palette.error : Palette.onSurface),
+            ),
             if (message.lrNumbers.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                'From records: ${message.lrNumbers.join(', ')}',
-                style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted),
+              const SizedBox(height: 10),
+              StatusChip.tone(
+                'From ${message.lrNumbers.length == 1 ? message.lrNumbers.single : '${message.lrNumbers.length} LRs'}',
+                Tone.success,
               ),
             ],
           ],
@@ -136,25 +145,13 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _welcome() {
     final text = Theme.of(context).textTheme;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 32, 16, 16),
+      padding: const EdgeInsets.fromLTRB(20, 28, 20, 16),
       children: [
-        Container(
-          width: 56,
-          height: 56,
-          alignment: Alignment.centerLeft,
-          child: Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(color: Palette.primaryContainer, borderRadius: BorderRadius.circular(16)),
-            child: const Icon(Icons.chat_bubble_outline, color: Palette.onPrimaryContainer),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text('Ask about your goods', style: text.headlineMedium),
-        const SizedBox(height: 8),
+        Text('Your goods.\nOne conversation.', style: text.displaySmall),
+        const SizedBox(height: 12),
         Text(
-          'Try an LR number, a city, a day, or a truck number. I look things up; I never change anything.',
-          style: text.bodyLarge!.copyWith(color: Palette.onSurfaceVariant),
+          'Ask about an LR, a city, a day or a truck. I look things up; I never change anything.',
+          style: text.bodyMedium!.copyWith(color: Palette.onSurfaceMuted),
         ),
       ],
     );
@@ -164,42 +161,63 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Ask')),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: _messages.isEmpty
-                  ? _welcome()
-                  : ListView(
-                      controller: _scroll,
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        for (final m in _messages) _bubble(m),
-                        if (_waiting) _bubble(const _Message('Looking that up…', mine: false)),
-                      ],
-                    ),
+      body: Column(
+        children: [
+          HeroHeader(
+            leading: Row(
+              children: [
+                const Icon(Icons.auto_awesome, color: Palette.primary),
+                const SizedBox(width: 10),
+                Text('Ask FreightFlow', style: onInk(text.titleLarge!)),
+              ],
             ),
-            if (_suggestions.isNotEmpty && !_waiting)
-              SizedBox(
-                height: 44,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _suggestions.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (_, i) => ActionChip(
-                    label: Text(_suggestions[i]),
-                    labelStyle: text.labelMedium!.copyWith(color: Palette.link),
-                    backgroundColor: Palette.surface,
-                    side: const BorderSide(color: Palette.outline),
-                    shape: const StadiumBorder(),
-                    onPressed: () => _send(_suggestions[i]),
+            title: '',
+            child: Row(
+              children: [
+                StatusChip.tone('Read only', Tone.dark),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('Answers, without changing a thing.', style: onInk(text.bodySmall!, muted: true)),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _messages.isEmpty
+                ? _welcome()
+                : ListView(
+                    controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                    children: [
+                      for (final m in _messages) _bubble(m),
+                      if (_waiting) _bubble(const _Message('Looking that up…', mine: false)),
+                    ],
                   ),
+          ),
+          if (_suggestions.isNotEmpty && !_waiting)
+            SizedBox(
+              height: 46,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                itemCount: _suggestions.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => ActionChip(
+                  label: Text(_suggestions[i]),
+                  labelStyle: text.labelMedium,
+                  backgroundColor: Palette.surface,
+                  side: BorderSide.none,
+                  shape: const StadiumBorder(),
+                  onPressed: () => _send(_suggestions[i]),
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            ),
+          Padding(
+            // Clears the floating navigation bar, which this screen sits under.
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, navBarClearance - 18),
+            child: Container(
+              padding: const EdgeInsets.only(left: 18, right: 6),
+              decoration: BoxDecoration(color: Palette.surface, borderRadius: BorderRadius.circular(999)),
               child: Row(
                 children: [
                   Expanded(
@@ -207,20 +225,31 @@ class _ChatScreenState extends State<ChatScreen> {
                       controller: _input,
                       textInputAction: TextInputAction.send,
                       onSubmitted: _send,
-                      decoration: const InputDecoration(hintText: 'Ask about an LR, a city or a truck'),
+                      decoration: const InputDecoration(
+                        hintText: 'Ask about your goods…',
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(vertical: 16),
+                      ),
                     ),
                   ),
-                  const SizedBox(width: 8),
                   IconButton.filled(
                     tooltip: 'Send',
+                    style: IconButton.styleFrom(
+                      backgroundColor: Palette.primary,
+                      foregroundColor: Palette.onPrimary,
+                      minimumSize: const Size(46, 46),
+                    ),
                     onPressed: _waiting ? null : () => _send(_input.text),
                     icon: const Icon(Icons.arrow_upward),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

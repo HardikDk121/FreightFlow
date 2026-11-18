@@ -56,7 +56,7 @@ def test_load_sheet_lists_the_truck_and_what_to_collect(client, admin):
         "/trips",
         json={
             "truck_id": truck,
-            "destination": "Surat",
+            "stops": ["Surat"],
             "driver_name": "Ramesh",
             "lines": [{"lr_id": to_pay["id"], "packages": 2}, {"lr_id": paid["id"], "packages": 4}],
         },
@@ -70,7 +70,7 @@ def test_load_sheet_lists_the_truck_and_what_to_collect(client, admin):
     # the rest of the to-pay LR goes on a second truck, which collects nothing
     second = client.post(
         "/trips",
-        json={"truck_id": _truck(client, h, "GJ03AB0001"), "destination": "Surat", "lines": [{"lr_id": to_pay["id"], "packages": 4}]},
+        json={"truck_id": _truck(client, h, "GJ03AB0001"), "stops": ["Surat"], "lines": [{"lr_id": to_pay["id"], "packages": 4}]},
         headers=h,
     ).json()
     assert "Rs 35.00" not in _pages(client.get(f"/trips/{second['id']}/load-sheet.pdf", headers=h))[0]
