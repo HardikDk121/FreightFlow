@@ -22,16 +22,30 @@ services:
       FF_DATABASE_URL: postgresql+psycopg://freightflow_app:${FF_APP_PASSWORD}@db/freightflow
       FF_MIGRATION_DATABASE_URL: postgresql+psycopg://freightflow_owner:${FF_OWNER_PASSWORD}@db/freightflow
       FF_JWT_SECRET: ${FF_JWT_SECRET}
-      # Optional. See .env.example.
       FF_SMTP_HOST: ${FF_SMTP_HOST:-}
       FF_SMTP_PORT: ${FF_SMTP_PORT:-587}
       FF_SMTP_USER: ${FF_SMTP_USER:-}
       FF_SMTP_PASSWORD: ${FF_SMTP_PASSWORD:-}
-      FF_SMTP_FROM: ${FF_SMTP_FROM:-FreightFlow <no-reply@freightflow.local>}
+      FF_SMTP_FROM: "${FF_SMTP_FROM:-FreightFlow <no-reply@freightflow.local>}"
       FF_LLM_API_KEY: ${FF_LLM_API_KEY:-}
       FF_LLM_MODEL: ${FF_LLM_MODEL:-claude-haiku-5-5}
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
 
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:
