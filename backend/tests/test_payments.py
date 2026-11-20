@@ -5,26 +5,31 @@ from tests.conftest import add_staff, bearer, register
 from tests.test_dispatch import _lr, _truck
 
 
-def _pay(client, tokens, lr, amount, mode="cash", **extra):
-    return client.post(f"/lrs/{lr['id']}/payments", json={"amount": amount, "mode": mode, **extra}, headers=bearer(tokens))
+def _receipt(client, tokens, *lrs, phone="9327410932"):
+    response = client.post("/receipts", json={"lr_ids": [lr["id"] for lr in lrs], "payer_phone": phone}, headers=bearer(tokens))
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
-def test_part_payments_run_the_balance_down_and_cannot_overshoot(client, admin):
-    lr = _lr(client, bearer(admin), freight="900", st_charges="100", freight_by="Paid")
+def _visit(client, tokens, receipt, outcome, **payment):
+    body = {"outcome": outcome}
+    if payment:
+        body["payment"] = payment
+    return client.post(f"/receipts/{receipt['id']}/visits", json=body, headers=bearer(tokens))
+
+
+def test_an_lr_account_lists_what_was_collected_against_it(client, admin):
+    lr = _lr(client, bearer(admin), rate="9", freight="900", st_charges="100", freight_by="Paid")
     account = client.get(f"/lrs/{lr['id']}/account", headers=bearer(admin)).json()
     assert (account["total"], account["paid"], account["balance"], account["payer"]) == ("1000.00", "0", "1000.00", "Rangoli Laminate")
 
-    advance = _pay(client, admin, lr, "400", "upi", reference="UPI-88213")
-    assert advance.status_code == 201 and advance.json()["balance"] == "600.00"
-    too_much = _pay(client, admin, lr, "600.01")
-    assert too_much.status_code == 409 and "Only Rs 600.00 is outstanding" in too_much.json()["error"]["message"]
-    settled = _pay(client, admin, lr, "600", "cheque", reference="004512", received_on=str(today())).json()
-    assert (settled["balance"], settled["overdue"]) == ("0.00", False)
-    assert [(p["amount"], p["mode"], p["reference"]) for p in settled["payments"]] == [("400.00", "upi", "UPI-88213"), ("600.00", "cheque", "004512")]
-    assert _pay(client, admin, lr, "1").status_code == 409
-
-    for bad in ({"amount": "0", "mode": "cash"}, {"amount": "10", "mode": "bitcoin"}, {"amount": "10.005", "mode": "cash"}):
-        assert client.post(f"/lrs/{lr['id']}/payments", json=bad, headers=bearer(admin)).status_code == 422
+    receipt = _receipt(client, admin, lr)
+    assert _visit(client, admin, receipt, "part_paid", method="upi", amount="400", utr="432112345678").status_code == 201
+    account = client.get(f"/lrs/{lr['id']}/account", headers=bearer(admin)).json()
+    assert (account["paid"], account["balance"]) == ("400.00", "600.00")
+    assert [(p["amount"], p["method"], p["status"], p["reference"], p["receipt_number"]) for p in account["payments"]] == [
+        ("400.00", "upi", "pending", "432112345678", "MR-1")
+    ]
     # money has come in, so the LR can no longer be cancelled
     assert client.post(f"/lrs/{lr['id']}/cancel", json={"reason": "x"}, headers=bearer(admin)).status_code == 409
 
@@ -55,7 +60,7 @@ def test_receivables_by_party_and_roles(client, admin):
     half = _lr(client, h, days_ago=2, st_charges="300", freight_by="TBB")
     _lr(client, h, days_ago=1, st_charges="200", freight_by="TBB", consignor_name="Monal Laminate", consignor_gstin=None)
     _lr(client, h, st_charges="0")  # nothing to collect
-    _pay(client, admin, half, "100")
+    _visit(client, admin, _receipt(client, admin, half), "part_paid", method="cash", amount="100")
 
     owed = client.get("/receivables", headers=h).json()
     assert (owed["outstanding"], owed["overdue"]) == ("900.00", "500.00")
@@ -67,13 +72,10 @@ def test_receivables_by_party_and_roles(client, admin):
     assert [a["balance"] for a in open_lrs] == ["500.00", "200.00"]
 
     clerk = add_staff(client, admin, "clerk@shree.example", "clerk")
-    dispatcher = add_staff(client, admin, "d@shree.example", "dispatcher")
-    assert _pay(client, clerk, half, "50").status_code == 201
-    assert _pay(client, dispatcher, half, "50").status_code == 403
     assert client.get("/receivables", headers=bearer(clerk)).status_code == 403
     other = register(client, "Other Transport", "o@o.example")
     assert client.get("/receivables", headers=bearer(other)).json()["parties"] == []
-    assert _pay(client, other, half, "10").status_code == 404
+    assert client.get(f"/lrs/{half['id']}/account", headers=bearer(other)).status_code == 404
 
 
 def test_admin_dashboard(client, admin):

@@ -106,6 +106,9 @@ class _LoadTruckScreenState extends State<LoadTruckScreen> with Submitter {
         _routeId = routeId;
         _stops = stops;
         _plan = null;
+        _planNote = null;
+        _planRequest++;
+        _planning = false;
         _setLrs(lrs, const {});
       });
     } on ApiException catch (e) {
@@ -113,29 +116,55 @@ class _LoadTruckScreenState extends State<LoadTruckScreen> with Submitter {
     }
   }
 
+  /// Bumped whenever the truck or the stops change, so a plan that comes back for the old choice
+  /// is thrown away instead of being applied to the new one.
+  int _planRequest = 0;
+
+  /// One key for this dispatch, so a retried tap cannot send the truck out twice.
+  final _dispatchKey = newIdempotencyKey();
+
+  /// What the last suggestion did, shown under the button: success, nothing to plan, or why.
+  String? _planNote;
+
   /// Ask the planner what fits, and put its suggestion in the package boxes.
+  ///
+  /// Two things used to make this fail now and then: a plan that arrived after the truck or route
+  /// had been changed was applied to the wrong load; and the list of LRs on screen could be older
+  /// than the planner's, so LRs booked or dispatched since were silently skipped. The pending list
+  /// is now fetched again with every plan, and late answers are ignored.
   Future<void> _suggest() async {
+    final request = ++_planRequest;
+    final truckId = _truckId;
+    final stops = _stops;
     setState(() {
       _planning = true;
+      _planNote = null;
       error = null;
     });
     try {
-      final plan = await context.read<ApiClient>().post('/trips/plan', {'truck_id': _truckId, 'stops': _stops})
-          as Map<String, dynamic>;
-      if (!mounted) return;
+      final api = context.read<ApiClient>();
+      final results = await Future.wait([
+        api.post('/trips/plan', {'truck_id': truckId, 'stops': stops}),
+        _pendingFor(stops),
+      ]);
+      if (!mounted || request != _planRequest) return;
+      final plan = results[0] as Map<String, dynamic>;
+      final lrs = results[1] as List<Map<String, dynamic>>;
+      final lines = (plan['lines'] as List).cast<Map<String, dynamic>>();
       setState(() {
         _plan = plan;
-        for (final c in _load.values) {
-          c.text = '0';
-        }
-        for (final line in (plan['lines'] as List).cast<Map<String, dynamic>>()) {
-          _load[line['lr_id']]?.text = '${line['load']}';
-        }
+        _setLrs(lrs, {for (final line in lines) line['lr_id'] as String: line['load'] as int});
+        final skipped = (plan['unsized'] as List).length + (plan['too_big'] as List).length;
+        _planNote = lrs.isEmpty
+            ? 'Nothing is waiting for ${stops.join(', ')}.'
+            : lines.isEmpty
+                ? 'Nothing fits this truck${skipped > 0 ? ': $skipped LR${skipped == 1 ? ' is' : 's are'} too big or have no weight' : ''}. Choose another truck or set packages by hand.'
+                : 'Suggested ${lines.fold<int>(0, (n, l) => n + (l['load'] as int))} packages from ${lines.length} LR${lines.length == 1 ? '' : 's'}. Change any count before dispatching.';
       });
     } on ApiException catch (e) {
-      if (mounted) setState(() => error = e.message);
+      if (mounted && request == _planRequest) setState(() => _planNote = e.message);
     } finally {
-      if (mounted) setState(() => _planning = false);
+      if (mounted && request == _planRequest) setState(() => _planning = false);
     }
   }
 
@@ -150,7 +179,7 @@ class _LoadTruckScreenState extends State<LoadTruckScreen> with Submitter {
     }
     final name = _driverName.text.trim();
     final phone = _driverPhone.text.trim();
-    await context.read<ApiClient>().post('/trips', {
+    await context.read<ApiClient>().post(idempotencyKey: _dispatchKey, '/trips', {
       'truck_id': _truckId,
       'stops': _stops,
       if (name.isNotEmpty) 'driver_name': name,
@@ -244,6 +273,9 @@ class _LoadTruckScreenState extends State<LoadTruckScreen> with Submitter {
               onTap: () => setState(() {
                 _truckId = t['id'] as String;
                 _plan = null;
+                _planNote = null;
+                _planRequest++;
+                _planning = false;
               }),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -454,9 +486,16 @@ class _LoadTruckScreenState extends State<LoadTruckScreen> with Submitter {
         ),
         OutlinedButton.icon(
           onPressed: _truckId == null || _planning ? null : _suggest,
-          icon: const Icon(Icons.auto_awesome_outlined),
-          label: Text(_planning ? 'Planning…' : 'Suggest a load'),
+          icon: _planning
+              ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.auto_awesome_outlined),
+          label: Text(_planning ? 'Planning…' : _truckId == null ? 'Choose a truck to get a suggestion' : 'Suggest a load'),
         ),
+        if (_planNote != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_planNote!, style: text.bodySmall!.copyWith(color: Palette.onSurfaceVariant)),
+          ),
         SectionHeader(
           'Select lorry receipts',
           icon: Icons.checklist_rounded,

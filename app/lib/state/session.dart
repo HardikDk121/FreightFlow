@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../api/api_client.dart';
+import '../widgets/loader.dart';
 
 enum SessionStatus { loading, failed, signedOut, signedIn }
 
@@ -13,6 +14,10 @@ class User {
     required this.role,
     required this.language,
     required this.isActive,
+    required this.branchId,
+    required this.permissions,
+    required this.granted,
+    required this.revoked,
   });
 
   factory User.fromJson(Map<String, dynamic> json) => User(
@@ -23,6 +28,10 @@ class User {
         role: json['role'] as String,
         language: json['language'] as String,
         isActive: json['is_active'] as bool,
+        branchId: json['branch_id'] as String?,
+        permissions: {for (final p in (json['permissions'] as List? ?? const [])) p as String},
+        granted: [for (final p in (json['permissions_granted'] as List? ?? const [])) p as String],
+        revoked: [for (final p in (json['permissions_revoked'] as List? ?? const [])) p as String],
       );
 
   final String id;
@@ -33,20 +42,68 @@ class User {
   final String language;
   final bool isActive;
 
+  /// Null: works across all branches.
+  final String? branchId;
+
+  /// What this person may do, as worked out by the server. The server checks every action
+  /// again, so these only decide what the app offers.
+  final Set<String> permissions;
+  final List<String> granted;
+  final List<String> revoked;
+
+  bool can(String permission) => permissions.contains(permission);
+
+  /// The owner: every permission, every branch.
   bool get isAdmin => role == 'admin';
 
-  bool get canEditMasterData => role == 'admin' || role == 'manager';
+  bool get canEditMasterData => can('masterdata.edit');
 
-  bool get canBookLr => role == 'admin' || role == 'manager' || role == 'clerk';
+  bool get canBookLr => can('lr.book');
 
-  bool get canCancelLr => role == 'admin' || role == 'manager';
+  bool get canCancelLr => can('lr.cancel');
 
-  /// Receivables and other money views.
-  bool get canSeeMoney => role == 'admin' || role == 'manager';
+  bool get canSeeMoney => can('money.receivables');
 
-  bool get canUndoDelivery => role == 'admin' || role == 'manager';
+  bool get canSeeMoneyTrail => can('money.overview');
 
-  bool get canDispatch => role == 'admin' || role == 'manager' || role == 'dispatcher';
+  bool get canIssueReceipts => can('receipt.issue');
+
+  bool get canCollect => can('collect');
+
+  bool get canReceiveCash => can('cash.receive');
+
+  bool get canUndoDelivery => can('dispatch.undo_delivery');
+
+  bool get canDispatch => can('dispatch.manage');
+
+  bool get canIssueGatePass => can('gatepass.issue');
+
+  bool get canConfirmDelivery => can('delivery.confirm');
+
+  bool get canCorrectDelivery => can('delivery.correct');
+
+  bool get canManageTasks => can('tasks.manage');
+
+  bool get canManageCredit => can('credit.manage');
+
+  bool get canReconcileBank => can('bank.reconcile');
+
+  bool get canRequestApproval => can('approvals.request');
+
+  bool get canDecideApproval => can('approvals.decide');
+
+  bool get canManageUsers => can('users.manage');
+
+  bool get canManageBranches => can('branches.manage');
+
+  /// The operations dashboard: the owner's whole business, or a manager's branch.
+  bool get seesOperations => can('dashboard.owner') || can('tasks.manage') || can('money.overview');
+
+  /// Anything in the Collections area at all.
+  bool get worksWithMoney => canIssueReceipts || canCollect || canReceiveCash;
+
+  /// Anything in the Delivery area: gate passes and proof of delivery.
+  bool get worksWithDelivery => canIssueGatePass || canConfirmDelivery;
 }
 
 /// Who is signed in. The root widget switches between the auth screens and the app on [status].
@@ -122,6 +179,7 @@ class Session extends ChangeNotifier {
 
   void _signedOut() {
     user = null;
+    LoaderState.clearCache();
     status = SessionStatus.signedOut;
     notifyListeners();
   }

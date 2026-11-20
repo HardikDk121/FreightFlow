@@ -6,13 +6,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.deps import current_user, require_roles
+from app.deps import current_user
 from app.masterdata import schemas, service
 from app.masterdata.service import MasterDataService
-from app.models import Role, User
+from app.models import User
+from app.permissions import P, require
 from app.rates import schemas as rates
 
-_editor = require_roles(Role.ADMIN, Role.MANAGER)
+_editor = require(P.MASTERDATA_EDIT)
 
 
 def _build(

@@ -28,9 +28,15 @@ class Outbox:
             # Runs after the response has gone out; the person can ask for another code.
             log.exception("Could not send email to %s", to)
 
-    def sms(self, to: str, body: str) -> None:
-        # No SMS provider is chosen yet. Subclass Outbox and override this to add one.
+    def sms(self, to: str, body: str) -> bool:
+        """Send a text message; True if it went out. No provider is chosen yet: subclass and override."""
         log.warning("No SMS provider configured. SMS to %s not sent:\n%s", to, body)
+        return False
+
+    def whatsapp(self, to: str, body: str) -> bool:
+        """Send a WhatsApp message; True if it went out. No provider is chosen yet: subclass and override."""
+        log.warning("No WhatsApp provider configured. Message to %s not sent:\n%s", to, body)
+        return False
 
 
 _outbox = Outbox()

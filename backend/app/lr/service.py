@@ -5,11 +5,24 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app import audit
+from app import audit, branches
 from app.errors import AppError, conflict, not_found
 from app.eway.rules import Consignment, Requirement, evaluate
-from app.lr.schemas import LrDefaults, LrFields, LrSettingsUpdate, LrSuggestions, PartySuggestion
-from app.models import DispatchLine, ItemType, Lr, LrSettings, Party, Payment, RateRule, User
+from app.collections import credit
+from app.lr.schemas import LrCreate, LrDefaults, LrFields, LrSettingsUpdate, LrSuggestions, PartySuggestion
+from app.models import (
+    CollectionAllocation,
+    DispatchLine,
+    GatePass,
+    ItemType,
+    Lr,
+    LrSettings,
+    MoneyReceipt,
+    MoneyReceiptLine,
+    Party,
+    RateRule,
+    User,
+)
 from app.security import utcnow
 
 
@@ -31,6 +44,29 @@ def take_trip_number(session: Session, company_id: uuid.UUID) -> int:
     return number
 
 
+_COUNTERS = {
+    "receipt": ("next_receipt_number", "receipt_prefix"),
+    "gate_pass": ("next_gate_pass_number", "gate_pass_prefix"),
+    "deposit": ("next_deposit_number", None),
+}
+
+
+def take_document_number(session: Session, company_id: uuid.UUID, kind: str) -> str:
+    """The next number for a money receipt, gate pass or deposit batch, gap-free like LR numbers.
+    Receipts and gate passes take the company's prefix ("MR-12"), or none to continue a paper
+    series ("90013"); deposits are always "DEP-n", the form written on bank slips."""
+    column, prefix_column = _COUNTERS[kind]
+    settings = _settings(session, company_id, for_update=True)
+    number = getattr(settings, column)
+    setattr(settings, column, number + 1)
+    prefix = getattr(settings, prefix_column) if prefix_column else "DEP"
+    return f"{prefix}-{number}" if prefix else str(number)
+
+
+def collector_cash_limit(session: Session, company_id: uuid.UUID):
+    return _settings(session, company_id).collector_cash_limit
+
+
 def get_settings(session: Session, user: User) -> LrSettings:
     return _settings(session, user.company_id)
 
@@ -43,6 +79,14 @@ def update_settings(session: Session, actor: User, data: LrSettingsUpdate) -> Lr
     highest = session.scalar(select(func.max(Lr.series_no)).where(Lr.prefix == settings.prefix))
     if highest is not None and settings.next_number <= highest:
         raise conflict(f"LR {settings.prefix}-{highest} already exists. The next number must be higher.")
+    # The next receipt or gate pass number must not have been used already.
+    for model, column, prefix, number, label in (
+        (MoneyReceipt, MoneyReceipt.receipt_number, settings.receipt_prefix, settings.next_receipt_number, "Money receipt"),
+        (GatePass, GatePass.gate_pass_number, settings.gate_pass_prefix, settings.next_gate_pass_number, "Gate pass"),
+    ):
+        candidate = f"{prefix}-{number}" if prefix else str(number)
+        if session.scalar(select(model.id).where(column == candidate)) is not None:
+            raise conflict(f"{label} {candidate} already exists. Choose a higher next number.")
     session.flush()
     audit.record(
         session,
@@ -87,7 +131,27 @@ def suggestions(session: Session, consignor_name: str | None, consignor_gstin: s
     )
 
 
-def create(session: Session, actor: User, data: LrFields) -> Lr:
+def _check_matrix_freight(session: Session, data: LrFields) -> None:
+    """Freight from the rate matrix is priced again here, so it cannot be typed over."""
+    from app.rates.schemas import QuoteRequest
+    from app.rates.service import price
+
+    rule = session.get_one(RateRule, data.rate_rule_id)
+    quote = price(
+        session,
+        QuoteRequest(
+            goods_class=rule.goods_class,
+            to_city=data.to_city,
+            packages=data.packages,
+            weight_per_package=data.weight_per_package,
+            total_weight=data.charged_weight or data.weight,
+        ),
+    )
+    if quote.freight != data.freight:
+        raise AppError(422, "freight_mismatch", f"The rate matrix gives Rs {quote.freight:,.2f} for this LR, not Rs {data.freight:,.2f}.")
+
+
+def create(session: Session, actor: User, data: LrCreate) -> Lr:
     """Assign the next number and save. The settings row lock makes concurrent saves take turns,
     and a failed save rolls the counter back, so the series has no gaps."""
     # A foreign key is checked outside row-level security, so confirm the item type is this company's.
@@ -95,6 +159,11 @@ def create(session: Session, actor: User, data: LrFields) -> Lr:
         raise not_found("Item type")
     if data.rate_rule_id is not None and session.get(RateRule, data.rate_rule_id) is None:
         raise not_found("Rate")
+    if data.charge_basis == "matrix":
+        _check_matrix_freight(session, data)
+    total = data.freight + data.hamali + data.other_charges + data.st_charges
+    payer = data.consignee_name if data.freight_by == "ToPay" else data.consignor_name
+    override = credit.booking_check(session, actor, payer, data.freight_by, total, data.credit_override_reason)
     requirement = evaluate(
         Consignment(
             value=data.value,
@@ -123,7 +192,10 @@ def create(session: Session, actor: User, data: LrFields) -> Lr:
         series_no=number,
         lr_number=f"{settings.prefix}-{number}",
         created_by=actor.id,
-        **data.model_dump(mode="python"),
+        credit_override_reason=override,
+        branch_id=branches.home_branch(session, actor),
+        delivery_branch_id=branches.delivering_branch(session, data.to_city),
+        **data.model_dump(mode="python", exclude={"credit_override_reason"}),
     )
     session.add(lr)
     settings.next_number = number + 1
@@ -212,8 +284,15 @@ def cancel(session: Session, actor: User, lr_id: uuid.UUID, reason: str) -> Lr:
         raise conflict("This LR is already cancelled.")
     if session.scalar(select(DispatchLine.id).where(DispatchLine.lr_id == lr.id).limit(1)) is not None:
         raise conflict("This LR has already been dispatched, so it cannot be cancelled.")
-    if session.scalar(select(Payment.id).where(Payment.lr_id == lr.id).limit(1)) is not None:
+    if session.scalar(select(CollectionAllocation.id).where(CollectionAllocation.lr_id == lr.id).limit(1)) is not None:
         raise conflict("Money has been received against this LR, so it cannot be cancelled.")
+    open_receipt = session.scalar(
+        select(MoneyReceipt.receipt_number)
+        .join(MoneyReceiptLine, MoneyReceiptLine.receipt_id == MoneyReceipt.id)
+        .where(MoneyReceiptLine.lr_id == lr.id, MoneyReceipt.status == "open")
+    )
+    if open_receipt is not None:
+        raise conflict(f"Money receipt {open_receipt} is open for this LR. Cancel the receipt first.")
     lr.status = "cancelled"
     lr.cancelled_by = actor.id
     lr.cancelled_at = utcnow()

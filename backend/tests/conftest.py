@@ -16,7 +16,7 @@ from app.main import app
 from app.notify import Outbox, get_outbox
 
 owner_engine = create_engine(os.environ["FF_MIGRATION_DATABASE_URL"])
-TABLES = "payment, rate_rule, route, station, auth_throttle, password_reset, dispatch_line, challan, trip, lr, lr_settings, audit_log, truck, item_type, party, user_invite, auth_token, app_user, company"
+TABLES = "approval_request, reminder, task_attempt, collection_task, gate_pass_line, lr_charge, branch, idempotency_key, customer_notice, gate_pass, release_approval, credit_terms, shortage, collection_allocation, collection, bank_statement_line, bank_import, statement_format, bank_deposit, cash_handover, collection_visit, money_receipt_line, money_receipt, rate_rule, route, station, auth_throttle, password_reset, dispatch_line, challan, trip, lr, lr_settings, audit_log, truck, item_type, party, user_invite, auth_token, app_user, company"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -40,12 +40,18 @@ class RecordingOutbox(Outbox):
     def __init__(self):
         self.emails: list[tuple[str, str, str]] = []
         self.texts: list[tuple[str, str]] = []
+        self.whatsapps: list[tuple[str, str]] = []
 
     def email(self, to, subject, body):
         self.emails.append((to, subject, body))
 
     def sms(self, to, body):
         self.texts.append((to, body))
+        return True
+
+    def whatsapp(self, to, body):
+        self.whatsapps.append((to, body))
+        return True
 
 
 @pytest.fixture

@@ -5,6 +5,7 @@ import 'api/api_client.dart';
 import 'config.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/shell.dart';
+import 'state/pod_queue.dart';
 import 'state/session.dart';
 import 'theme/app_theme.dart';
 import 'widgets/common.dart';
@@ -26,6 +27,7 @@ void main() {
     MultiProvider(
       providers: [
         Provider<ApiClient>.value(value: api),
+        Provider<PodQueue>(create: (_) => PodQueue(api)),
         ChangeNotifierProvider<Session>(create: (_) => Session(api)..bootstrap()),
       ],
       child: const FreightFlowApp(),

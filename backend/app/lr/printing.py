@@ -32,12 +32,14 @@ def _plain_number(value: Decimal) -> str:
     return f"{value:.0f}" if value == value.to_integral_value() else f"{value:.2f}"
 
 
-# The four paper copies, in the order they are handed out.
+# The three paper copies, named by the colour of their paper, with a band of that colour printed
+# beside the label so a copy printed on plain paper can still be told apart.
+# Yellow goes to the sender who brings the goods to the godown; white and pink are stapled to the
+# LR and travel with the goods to the destination.
 COPIES = {
-    "consignee": "CONSIGNEE COPY",
-    "office": "OFFICE COPY",
-    "driver1": "DRIVER COPY 1",
-    "driver2": "DRIVER COPY 2",
+    "yellow": ("YELLOW COPY · CONSIGNOR", (0.96, 0.78, 0.0)),
+    "white": ("WHITE COPY · WITH GOODS", None),
+    "pink": ("PINK COPY · WITH GOODS", (0.96, 0.56, 0.69)),
 }
 
 
@@ -72,7 +74,12 @@ def format_fields(lr: LrPrintData) -> dict[str, str]:
         "packages": str(lr.packages),
         "weight": _amount(lr.weight) if lr.weight is not None else "",
         "charged_weight": _amount(lr.charged_weight) if lr.charged_weight is not None else "",
-        "rate": _amount(lr.rate),
+        # The unit tells the reader how the freight was worked out.
+        "rate": (
+            f"{_amount(lr.rate)}/{ {'per_kg': 'KG', 'per_article': 'ART'}[lr.charge_basis] }"
+            if lr.charge_basis in ("per_kg", "per_article") and lr.rate > 0
+            else (_amount(lr.rate) if lr.rate > 0 else "")
+        ),
         "freight": _amount(lr.freight),
         "hamali": _amount(lr.hamali),
         "other_charges": _amount(lr.other_charges),
@@ -91,8 +98,8 @@ def _fit_size(text: str, font: str, size: float, max_width_mm: float | None) -> 
     return size if width <= max_width_mm * mm else max(_MIN_FONT_SIZE, size * max_width_mm * mm / width)
 
 
-def render_lr_pdf(lr: LrPrintData, company: Company, copy_labels: list[str]) -> bytes:
-    """One page per label in `copy_labels`, each a full LR. An empty label prints an unlabelled page."""
+def render_lr_pdf(lr: LrPrintData, company: Company, copies: list[str | None]) -> bytes:
+    """One page per entry in `copies` (keys of COPIES), each a full LR. None prints an unlabelled page."""
     template = load_template()
     page_w = template["page"]["width_mm"] * mm
     page_h = template["page"]["height_mm"] * mm
@@ -127,7 +134,8 @@ def render_lr_pdf(lr: LrPrintData, company: Company, copy_labels: list[str]) -> 
     buffer = io.BytesIO()
     canvas = Canvas(buffer, pagesize=(page_w, page_h))
     canvas.setTitle(f"LR {lr.lr_number}")
-    for copy_label in copy_labels:
+    for copy in copies:
+        copy_label, colour = COPIES[copy] if copy else ("", None)
         canvas.setLineWidth(template["line_width_pt"])
         for x, y, w, h in template["rects"]:
             canvas.rect(px(x), py(y + h), w * mm, h * mm)
@@ -138,6 +146,13 @@ def render_lr_pdf(lr: LrPrintData, company: Company, copy_labels: list[str]) -> 
         for spec in template["fields"]:
             text = copy_label if spec["field"] == "copy_label" else values[spec["field"]]
             draw_text(text, spec, _fit_size(text, spec["font"], spec["size"], spec.get("max_width_mm")))
+            if spec["field"] == "copy_label" and copy_label:
+                # A small swatch before the label: filled in the copy's colour, outlined for white.
+                canvas.saveState()
+                if colour is not None:
+                    canvas.setFillColorRGB(*colour)
+                canvas.rect(px(spec["x"] - 5), py(spec["y"]) - 0.4 * mm, 3.6 * mm, 2.6 * mm, stroke=1, fill=1 if colour else 0)
+                canvas.restoreState()
         canvas.showPage()
     canvas.save()
     return buffer.getvalue()

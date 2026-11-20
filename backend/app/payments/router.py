@@ -1,32 +1,25 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.deps import current_user, require_roles
-from app.models import Role, User
+from app.deps import current_user
+from app.models import User
 from app.payments import service
-from app.payments.schemas import LrAccount, PaymentCreate, Receivables
+from app.payments.schemas import Ageing, LrAccount, Priorities, Receivables
+from app.permissions import P, require
 
 router = APIRouter(tags=["payments"])
-_cashier = require_roles(Role.ADMIN, Role.MANAGER, Role.CLERK)
-_owner = require_roles(Role.ADMIN, Role.MANAGER)
+# The register clerk issues money receipts, so sees what each payer owes.
+_owner = require(P.MONEY_RECEIVABLES)
 
 
 @router.get("/lrs/{lr_id}/account", response_model=LrAccount)
 def get_lr_account(lr_id: uuid.UUID, _: User = Depends(current_user), session: Session = Depends(get_session)) -> LrAccount:
-    """What this LR is owed, what has been received, and each payment."""
+    """What this LR is owed, what has been received, and each collection set against it."""
     return service.lr_account(session, lr_id)
-
-
-@router.post("/lrs/{lr_id}/payments", response_model=LrAccount, status_code=status.HTTP_201_CREATED)
-def record_payment(
-    lr_id: uuid.UUID, body: PaymentCreate, actor: User = Depends(_cashier), session: Session = Depends(get_session)
-) -> LrAccount:
-    """Record money received against an LR: an advance, a part payment, or the balance."""
-    return service.record(session, actor, lr_id, body)
 
 
 @router.get("/receivables", response_model=Receivables)
@@ -42,3 +35,15 @@ def list_open_lrs(
 ) -> list[LrAccount]:
     """LRs with money still owed, oldest first, optionally for one payer."""
     return service.open_accounts(session, party)
+
+
+@router.get("/receivables/ageing", response_model=Ageing)
+def get_ageing(_: User = Depends(_owner), session: Session = Depends(get_session)) -> Ageing:
+    """Outstanding by days past due: not due, 0-7, 8-15, 16-30, 31-60 and over 60 days."""
+    return service.ageing(session)
+
+
+@router.get("/receivables/priorities", response_model=Priorities)
+def get_priorities(_: User = Depends(_owner), session: Session = Depends(get_session)) -> Priorities:
+    """Where the money is stuck, for deciding whom to chase first."""
+    return service.priorities(session)

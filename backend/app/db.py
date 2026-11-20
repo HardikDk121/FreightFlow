@@ -11,10 +11,18 @@ SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
 
 def set_tenant(session: Session, company_id: uuid.UUID) -> None:
-    """Scope the current transaction to one company. Row-level security reads this value."""
+    """Scope the current transaction to one company, all branches. Row-level security reads these values.
+    A signed-in user's request is then narrowed to their branch by `set_branches`."""
     session.execute(
-        text("SELECT set_config('app.company_id', :company_id, true)"),
+        text("SELECT set_config('app.company_id', :company_id, true), set_config('app.branches', 'all', true)"),
         {"company_id": str(company_id)},
+    )
+
+
+def set_branches(session: Session, branch_ids: list[uuid.UUID]) -> None:
+    """Limit the current transaction to these branches' records."""
+    session.execute(
+        text("SELECT set_config('app.branches', :branches, true)"), {"branches": ",".join(str(b) for b in branch_ids)}
     )
 
 

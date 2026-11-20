@@ -50,3 +50,6 @@ String kgLabel(num kg) {
       : text;
   return '$withCommas kg';
 }
+
+/// An API amount ("1000.00") as "₹1,000.00".
+String money(String amount) => rupees(double.parse(amount));

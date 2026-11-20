@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -8,13 +9,22 @@ import 'package:http/http.dart' as http;
 
 /// A failed API call. [status] is the HTTP status, or 0 when the server was unreachable.
 class ApiException implements Exception {
-  const ApiException(this.status, this.message);
+  const ApiException(this.status, this.message, {this.code});
 
   final int status;
   final String message;
 
+  /// The server's error code, such as "credit_hold", when it sent one.
+  final String? code;
+
   @override
   String toString() => message;
+}
+
+/// A fresh key for one user action, 32 hex characters.
+String newIdempotencyKey() {
+  final random = Random.secure();
+  return List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
 }
 
 class TokenStore {
@@ -61,11 +71,15 @@ class ApiClient {
   Future<dynamic> get(String path, {Map<String, String>? query}) async =>
       _json(await _send('GET', path, query: query));
 
-  Future<dynamic> post(String path, Map<String, dynamic> body, {bool auth = true}) async =>
-      _json(await _send('POST', path, body: body, auth: auth));
+  /// [idempotencyKey]: pass the same key when retrying the same action (a save, a payment), so the
+  /// server does it once. Make one with [newIdempotencyKey] when the screen opens.
+  Future<dynamic> post(String path, Map<String, dynamic> body, {bool auth = true, String? idempotencyKey}) async =>
+      _json(await _send('POST', path, body: body, auth: auth, idempotencyKey: idempotencyKey));
 
   Future<dynamic> patch(String path, Map<String, dynamic> body) async =>
       _json(await _send('PATCH', path, body: body));
+
+  Future<dynamic> put(String path, Map<String, dynamic> body) async => _json(await _send('PUT', path, body: body));
 
   /// GET that returns a file, such as a PDF.
   Future<Uint8List> getBytes(String path) async => (await _send('GET', path)).bodyBytes;
@@ -74,9 +88,30 @@ class ApiClient {
   Future<Uint8List> postForBytes(String path, Map<String, dynamic> body) async =>
       (await _send('POST', path, body: body)).bodyBytes;
 
-  /// Upload one photo as a multipart form and return the JSON reply.
-  Future<dynamic> postImage(String path, Uint8List bytes, String fileName) async =>
-      _json(await _send('POST', path, file: (bytes, fileName)));
+  /// Upload one file (a photo, a bank statement) as a multipart form, with any text [fields],
+  /// and return the JSON reply.
+  Future<dynamic> postFile(String path, Uint8List bytes, String fileName, {Map<String, String> fields = const {}}) async =>
+      _json(await _send('POST', path, file: (bytes, fileName), fields: fields));
+
+  /// A multipart form with text [fields] and, optionally, one file sent under [fileField].
+  Future<dynamic> postForm(
+    String path,
+    Map<String, String> fields, {
+    (Uint8List, String)? file,
+    String fileField = 'file',
+    String? idempotencyKey,
+  }) async =>
+      _json(
+        await _send(
+          'POST',
+          path,
+          file: file,
+          fileField: fileField,
+          fields: fields,
+          multipart: true,
+          idempotencyKey: idempotencyKey,
+        ),
+      );
 
   static dynamic _json(http.Response response) =>
       response.bodyBytes.isEmpty ? null : jsonDecode(utf8.decode(response.bodyBytes));
@@ -87,26 +122,32 @@ class ApiClient {
     Map<String, dynamic>? body,
     Map<String, String>? query,
     (Uint8List, String)? file,
+    Map<String, String> fields = const {},
+    String fileField = 'file',
+    bool multipart = false,
     bool auth = true,
+    String? idempotencyKey,
     bool retried = false,
   }) async {
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final http.BaseRequest request;
-    if (file != null) {
-      request = http.MultipartRequest(method, uri)
-        ..files.add(http.MultipartFile.fromBytes('file', file.$1, filename: file.$2));
+    if (file != null || multipart) {
+      final form = http.MultipartRequest(method, uri)..fields.addAll(fields);
+      if (file != null) form.files.add(http.MultipartFile.fromBytes(fileField, file.$1, filename: file.$2));
+      request = form;
     } else {
       final json = http.Request(method, uri);
       json.headers['Content-Type'] = 'application/json';
       if (body != null) json.body = jsonEncode(body);
       request = json;
     }
+    if (idempotencyKey != null) request.headers['Idempotency-Key'] = idempotencyKey;
     if (auth) {
       final access = await tokens.access;
       if (access != null) request.headers['Authorization'] = 'Bearer $access';
     }
 
-    // A photo upload waits for the server to read it, so it gets longer.
+    // An upload waits for the server to read it, so it gets longer.
     final timeout = file == null ? _timeout : _uploadTimeout;
     final http.Response response;
     try {
@@ -125,13 +166,24 @@ class ApiClient {
 
     if (response.statusCode == 401 && auth) {
       if (!retried && await _refresh()) {
-        return _send(method, path, body: body, query: query, file: file, retried: true);
+        return _send(
+          method,
+          path,
+          body: body,
+          query: query,
+          file: file,
+          fields: fields,
+          fileField: fileField,
+          multipart: multipart,
+          idempotencyKey: idempotencyKey,
+          retried: true,
+        );
       }
       await tokens.clear();
       onSessionExpired?.call();
     }
     if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, _errorMessage(response));
+      throw ApiException(response.statusCode, _errorMessage(response), code: _errorCode(response));
     }
     return response;
   }
@@ -149,6 +201,15 @@ class ApiClient {
     } on ApiException catch (e) {
       if (e.status == 0) rethrow; // offline is not a reason to sign the user out
       return false;
+    }
+  }
+
+  static String? _errorCode(http.Response response) {
+    try {
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return data is Map && data['error'] is Map ? data['error']['code'] as String? : null;
+    } on FormatException {
+      return null;
     }
   }
 

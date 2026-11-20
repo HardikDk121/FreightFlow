@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.deps import require_roles
 from app.errors import AppError
-from app.models import Company, Role, User
+from app.models import Company, User
+from app.permissions import P, require
 from app.scan.extractor import UnreadableImage, scan_invoice
 from app.scan.schemas import InvoiceScan
 
@@ -15,7 +15,7 @@ _MAX_BYTES = 10 * 1024 * 1024
 @router.post("/scan", response_model=InvoiceScan)
 def scan(
     file: UploadFile = File(...),
-    user: User = Depends(require_roles(Role.ADMIN, Role.MANAGER, Role.CLERK)),
+    user: User = Depends(require(P.LR_BOOK)),
     session: Session = Depends(get_session),
 ) -> InvoiceScan:
     """Read LR fields from an invoice photo. Nothing is saved, and the photo is not kept."""

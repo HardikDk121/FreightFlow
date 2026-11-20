@@ -5,13 +5,19 @@ import '../../api/api_client.dart';
 import '../../format.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/command_menu.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
 import '../account/account_screen.dart';
 import '../admin/admin_dashboard_screen.dart';
+import '../delivery/delivery_screens.dart';
 import '../lr/lr_form_screen.dart';
+import '../lr/lr_list_screen.dart' show LrDetailScreen;
+import '../money/money_screen.dart';
+import '../ops/ops_screens.dart';
 import '../pending/pending_screen.dart';
 import '../shell.dart';
+import '../tasks/tasks_screen.dart';
 
 const _weekdays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
 const _months = [
@@ -35,6 +41,24 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loader.currentState?.reload();
   }
 
+  /// Everything this person may open, for the command menu. The server checks each action again.
+  List<Command> _commands(User user) => [
+        if (user.canBookLr) Command(Icons.add, 'New LR', () => _open(const LrFormScreen()), keywords: 'book lorry receipt'),
+        if (user.canBookLr) Command(Icons.document_scanner_outlined, 'Scan an invoice', () => _open(const LrFormScreen(startWithScan: true))),
+        if (user.seesOperations) Command(Icons.insights_outlined, 'Operations', () => _open(const OperationsScreen()), keywords: 'dashboard branches'),
+        if (user.worksWithMoney) Command(Icons.payments_outlined, 'Collections', () => _open(const MoneyScreen()), keywords: 'money receipt cash bank'),
+        if (user.worksWithDelivery) Command(Icons.assignment_turned_in_outlined, 'Gate passes', () => _open(const GatePassesScreen()), keywords: 'delivery pod'),
+        if (user.canCollect || user.canManageTasks) Command(Icons.checklist, 'Collection tasks', () => _open(const TasksScreen()), keywords: 'chase follow up'),
+        if (user.canRequestApproval || user.canDecideApproval) Command(Icons.how_to_vote_outlined, 'Approvals', () => _open(const ApprovalsScreen())),
+        Command(Icons.person_outline, 'Account and settings', () => _open(const AccountScreen()), keywords: 'profile password team'),
+      ];
+
+  void _commandMenu() {
+    final user = context.read<Session>().user;
+    if (user == null) return;
+    showCommandMenu(context, commands: _commands(user), openLr: (lr) => _open(LrDetailScreen(lr: lr)));
+  }
+
   static String _greeting(int hour) => hour < 12
       ? 'Good morning'
       : hour < 17
@@ -46,15 +70,35 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = context.watch<Session>().user;
     final now = DateTime.now();
     final shell = ShellScope.of(context);
+    return CallbackShortcuts(
+      bindings: {for (final key in commandMenuShortcuts) key: _commandMenu},
+      child: Focus(
+        autofocus: true,
+        child: _page(context, user, now, shell),
+      ),
+    );
+  }
+
+  Widget _page(BuildContext context, User? user, DateTime now, ShellScope? shell) {
     return Scaffold(
       body: Column(
         children: [
           HeroHeader(
             leading: const Wordmark(),
-            trailing: IconButton(
-              tooltip: 'Account and settings',
-              icon: const Icon(Icons.person_outline, color: Palette.onInk),
-              onPressed: () => _open(const AccountScreen()),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Search and go to (Ctrl K)',
+                  icon: const Icon(Icons.search, color: Palette.onInk),
+                  onPressed: _commandMenu,
+                ),
+                IconButton(
+                  tooltip: 'Account and settings',
+                  icon: const Icon(Icons.person_outline, color: Palette.onInk),
+                  onPressed: () => _open(const AccountScreen()),
+                ),
+              ],
             ),
             title: '${_greeting(now.hour)}, ${user?.name.split(' ').first ?? ''}',
             subtitle: '${_weekdays[now.weekday - 1]}, ${now.day} ${_months[now.month - 1]} ${now.year}',
@@ -88,6 +132,28 @@ class _HomeScreenState extends State<HomeScreen> {
                             title: 'Scan invoice',
                             subtitle: 'Let the camera do it',
                             onTap: () => _open(const LrFormScreen(startWithScan: true)),
+                          ),
+                        if (user?.worksWithMoney ?? false)
+                          _Tile(
+                            icon: Icons.payments_outlined,
+                            title: 'Collections',
+                            subtitle: 'Receipts, cash, bank',
+                            dark: !canBook,
+                            onTap: () => _open(const MoneyScreen()),
+                          ),
+                        if (user?.worksWithDelivery ?? false)
+                          _Tile(
+                            icon: Icons.assignment_turned_in_outlined,
+                            title: 'Gate passes',
+                            subtitle: 'Release and deliver',
+                            onTap: () => _open(const GatePassesScreen()),
+                          ),
+                        if ((user?.canCollect ?? false) || (user?.canManageTasks ?? false))
+                          _Tile(
+                            icon: Icons.checklist,
+                            title: 'Tasks',
+                            subtitle: 'Customers to chase',
+                            onTap: () => _open(const TasksScreen()),
                           ),
                         _Tile(
                           icon: Icons.inventory_2_outlined,
@@ -127,15 +193,28 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                     ),
-                    if (user?.isAdmin ?? false) ...[
+                    if (user?.seesOperations ?? false) ...[
+                      const SizedBox(height: 12),
+                      AppCard(
+                        onTap: () => _open(const OperationsScreen()),
+                        child: const ListTile(
+                          contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+                          leading: Icon(Icons.dashboard_outlined, color: Palette.onSurface),
+                          title: Text('Operations'),
+                          subtitle: Text('Branches, deliveries, money owed, staff'),
+                          trailing: Icon(Icons.chevron_right, color: Palette.onSurfaceMuted),
+                        ),
+                      ),
+                    ],
+                    if (user?.can('dashboard.owner') ?? false) ...[
                       const SizedBox(height: 12),
                       AppCard(
                         onTap: () => _open(const AdminDashboardScreen()),
                         child: const ListTile(
                           contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 6),
                           leading: Icon(Icons.insights_outlined, color: Palette.onSurface),
-                          title: Text('Owner dashboard'),
-                          subtitle: Text('Revenue, money owed, fleet and rates'),
+                          title: Text('Revenue and fleet'),
+                          subtitle: Text('Freight booked, trucks, rate matrix'),
                           trailing: Icon(Icons.chevron_right, color: Palette.onSurfaceMuted),
                         ),
                       ),

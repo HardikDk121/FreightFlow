@@ -1,12 +1,10 @@
-from collections.abc import Callable
-
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
-from app.db import get_session, set_tenant
-from app.errors import forbidden, unauthorized
-from app.models import Role, User
+from app.db import get_session, set_branches, set_tenant
+from app.errors import unauthorized
+from app.models import User
 from app.security import decode_access_token
 
 _bearer = HTTPBearer(auto_error=False)
@@ -28,13 +26,10 @@ def current_user(
     user = session.get(User, claims.user_id)
     if user is None or not user.is_active:
         raise unauthorized()
+    # Narrow the transaction to the user's branch. Row-level security enforces it on every table
+    # that holds branch data, so no query can reach another branch's records.
+    from app.permissions import sees_all_branches
+
+    if not sees_all_branches(user):
+        set_branches(session, [user.branch_id])
     return user
-
-
-def require_roles(*roles: Role) -> Callable[[User], User]:
-    def dependency(user: User = Depends(current_user)) -> User:
-        if user.role not in roles:
-            raise forbidden()
-        return user
-
-    return dependency

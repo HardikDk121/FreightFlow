@@ -9,8 +9,9 @@ from app import audit
 from app.auth import service as auth_service
 from app.auth.schemas import TokenPair
 from app.config import get_settings
-from app.errors import AppError, conflict, not_found
-from app.models import Role, User, UserInvite
+from app.errors import AppError, conflict, forbidden, not_found
+from app.models import Branch, Role, User, UserInvite
+from app.permissions import SENSITIVE
 from app.security import hash_password, new_opaque_token, utcnow, verify_password
 from app.users.schemas import InviteCreated, InviteRequest, ProfileUpdate, UserAdminUpdate
 
@@ -45,14 +46,23 @@ def list_users(session: Session) -> list[User]:
     return list(session.scalars(select(User).order_by(User.name)))
 
 
+def _check_branch(session: Session, branch_id: uuid.UUID | None) -> None:
+    if branch_id is not None and session.get(Branch, branch_id) is None:
+        raise not_found("Branch")
+
+
 def create_invite(session: Session, actor: User, data: InviteRequest) -> InviteCreated:
     if session.scalar(select(User.id).where(User.email == data.email)) is not None:
         raise conflict("A user with that email already exists in this company.")
+    _check_branch(session, data.branch_id)
+    if data.role == Role.ADMIN and actor.role != Role.ADMIN:
+        raise forbidden()
     token, digest = new_opaque_token(actor.company_id)
     invite = UserInvite(
         company_id=actor.company_id,
         email=data.email,
         role=data.role,
+        branch_id=data.branch_id,
         token_hash=digest,
         invited_by=actor.id,
         expires_at=utcnow() + timedelta(hours=get_settings().invite_ttl_hours),
@@ -81,6 +91,15 @@ def _get_user(session: Session, user_id: uuid.UUID) -> User:
 def update_user(session: Session, actor: User, user_id: uuid.UUID, data: UserAdminUpdate) -> User:
     target = _get_user(session, user_id)
     changes = data.model_dump(exclude_unset=True)
+    # Owners, and owner-level permissions, are given and taken only by an owner.
+    sensitive = set(changes.get("permissions_granted") or ()) & SENSITIVE
+    if actor.role != Role.ADMIN and (target.role == Role.ADMIN or changes.get("role") == Role.ADMIN or sensitive):
+        raise forbidden()
+    if "branch_id" in changes:
+        _check_branch(session, changes["branch_id"])
+    for key in ("permissions_granted", "permissions_revoked"):
+        if key in changes:
+            changes[key] = sorted({p.value for p in changes[key]})
     stays_active_admin = changes.get("role", target.role) == Role.ADMIN and changes.get(
         "is_active", target.is_active
     )

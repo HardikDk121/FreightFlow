@@ -9,6 +9,8 @@ import '../../state/session.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/pdf_screen.dart';
+import '../delivery/delivery_screens.dart';
+import '../money/receipt_screens.dart' show askReason;
 import '../payments/payments_screens.dart';
 import '../shell.dart';
 import 'lr_form_screen.dart';
@@ -299,12 +301,20 @@ class LrCard extends StatelessWidget {
   }
 }
 
-const _copyOptions = {
-  'consignee': 'Consignee',
-  'office': 'Office',
-  'driver1': 'Driver 1',
-  'driver2': 'Driver 2',
-};
+/// Yellow goes to the sender; white and pink are stapled to the LR and travel with the goods.
+const _copyOptions = {'yellow': 'Yellow · Sender', 'white': 'White · With goods', 'pink': 'Pink · With goods'};
+
+/// How the freight was worked out, from what the LR saved.
+String freightWorking(Map<String, dynamic> lr) {
+  final rate = double.parse(lr['rate'] as String);
+  return switch (lr['charge_basis']) {
+    'per_kg' when rate > 0 =>
+      '${kgLabel(double.parse((lr['charged_weight'] ?? lr['weight']) as String))} × ${rupees(rate)} per kg',
+    'per_article' when rate > 0 => '${lr['packages']} articles × ${rupees(rate)} per article',
+    'matrix' => 'From the rate matrix',
+    _ => 'Freight as entered',
+  };
+}
 
 /// One saved LR: its headline, e-way bill, payments, copies to print, and cancel for admins and managers.
 class LrDetailScreen extends StatefulWidget {
@@ -368,6 +378,34 @@ class _LrDetailScreenState extends State<LrDetailScreen> {
     }
   }
 
+  /// Release the goods on a gate pass, with any other LRs for the same consignee.
+  void _gatePass() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => IssueGatePassScreen(lr: _lr)));
+
+  /// Ask the owner to let unpaid goods go. The request waits in their approvals.
+  Future<void> _requestRelease() async {
+    final reason = await askReason(context, title: 'Ask the owner to release?', hint: 'For example: regular party, pays Friday');
+    if (reason == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<ApiClient>().post('/lrs/${_lr['id']}/release-request', {'reason': reason});
+      messenger.showSnackBar(const SnackBar(content: Text('Sent to the owner for approval.')));
+    } on ApiException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  Future<void> _approveRelease() async {
+    final reason = await askReason(context, title: 'Release before payment?', hint: 'For example: regular customer, pays monthly');
+    if (reason == null || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<ApiClient>().post('/lrs/${_lr['id']}/release-approval', {'reason': reason});
+      messenger.showSnackBar(const SnackBar(content: Text('Approved. The office can now issue the gate pass.')));
+    } on ApiException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   void _openPdf() => Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => PdfScreen(
@@ -413,6 +451,13 @@ class _LrDetailScreenState extends State<LrDetailScreen> {
               Text(rupees(double.parse(_lr['total'] as String)), style: onInk(text.titleLarge!)),
             ],
           ),
+          const SizedBox(height: 6),
+          Text(
+            'Freight ${rupees(double.parse(_lr['freight'] as String))}: ${freightWorking(_lr)}',
+            style: onInk(text.bodySmall!, muted: true),
+          ),
+          if (_lr['credit_override_reason'] != null)
+            Text('Booked over a credit hold: ${_lr['credit_override_reason']}', style: onInk(text.bodySmall!, muted: true)),
         ],
       ),
     );
@@ -486,7 +531,7 @@ class _LrDetailScreenState extends State<LrDetailScreen> {
             height: 44,
             child: Center(
               child: Text(
-                selected ? '$label · Selected' : label,
+                label,
                 style: text.labelMedium!.copyWith(color: selected ? Palette.onInk : Palette.onSurface),
               ),
             ),
@@ -495,22 +540,15 @@ class _LrDetailScreenState extends State<LrDetailScreen> {
       );
     }
 
-    final keys = _copyOptions.keys.toList();
     return AppCard(
       padding: const EdgeInsets.all(14),
       child: Column(
         children: [
-          option('all', 'All 4 copies'),
+          option('all', 'All 3 copies'),
           const SizedBox(height: 10),
-          for (var i = 0; i < keys.length; i += 2) ...[
-            if (i > 0) const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(child: option(keys[i], _copyOptions[keys[i]]!)),
-                const SizedBox(width: 10),
-                Expanded(child: option(keys[i + 1], _copyOptions[keys[i + 1]]!)),
-              ],
-            ),
+          for (final entry in _copyOptions.entries) ...[
+            option(entry.key, entry.value),
+            if (entry.key != 'pink') const SizedBox(height: 10),
           ],
         ],
       ),
@@ -519,7 +557,8 @@ class _LrDetailScreenState extends State<LrDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canCancel = context.select<Session, bool>((s) => s.user?.canCancelLr ?? false);
+    final user = context.watch<Session>().user!;
+    final canCancel = user.canCancelLr;
     final text = Theme.of(context).textTheme;
     final ewb = _cancelled ? null : ewbChip(_lr['ewb_status'] as String);
     return Scaffold(
@@ -560,11 +599,53 @@ class _LrDetailScreenState extends State<LrDetailScreen> {
                 trailing: Icon(Icons.chevron_right, color: Palette.onSurfaceMuted),
               ),
             ),
+            if (user.canIssueGatePass || user.canManageCredit || user.canRequestApproval) ...[
+              const SizedBox(height: 12),
+              AppCard(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Release the goods', style: text.titleMedium),
+                    const SizedBox(height: 4),
+                    Text(
+                      'A to-pay LR needs payment, the customer\'s standing credit, or the owner\'s approval.',
+                      style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        if (user.canIssueGatePass)
+                          FilledButton(
+                            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+                            onPressed: _gatePass,
+                            child: const Text('Issue gate pass'),
+                          ),
+                        if (user.canManageCredit)
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+                            onPressed: _approveRelease,
+                            child: const Text('Approve release'),
+                          )
+                        else if (user.canRequestApproval)
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+                            onPressed: _requestRelease,
+                            child: const Text('Ask owner to release'),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SectionHeader('Print copies', icon: Icons.print_outlined),
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Choose all four or a single copy.',
+                'Yellow for the sender; white and pink travel with the goods.',
                 style: text.bodyMedium!.copyWith(color: Palette.onSurfaceMuted),
               ),
             ),
@@ -608,7 +689,7 @@ class _LrDetailScreenState extends State<LrDetailScreen> {
               children: [
                 BusyButton(
                   icon: Icons.picture_as_pdf_outlined,
-                  label: _copy == 'all' ? 'Open PDF · All 4 copies' : 'Open PDF · ${_copyOptions[_copy]} copy',
+                  label: _copy == 'all' ? 'Open PDF · All 3 copies' : 'Open PDF · ${_copyOptions[_copy]} copy',
                   onPressed: _openPdf,
                 ),
               ],

@@ -16,10 +16,11 @@ from sqlalchemy.orm import Session
 from app import audit
 from app.clock import midnight_after, today
 from app.dispatch.addition_schemas import AdditionRequest, ChallanLine, ChallanRead, DriverSignOff
-from app.dispatch.service import _locked_trip, _spec, is_sealed, seal
+from app.dispatch.service import _locked_trip, _spec, is_sealed, seal, stop_branches
 from app.errors import AppError, conflict, forbidden, not_found
 from app.eway.rules import validity_days
-from app.models import Challan, DispatchLine, ItemType, Lr, Role, Trip, Truck, User
+from app.models import Challan, DispatchLine, ItemType, Lr, Trip, Truck, User
+from app.permissions import P, has
 from app.planner.planner import Cargo, first_overload
 from app.security import utcnow
 
@@ -144,7 +145,7 @@ def _approver_of(trip: Trip, challan: Challan, user: User) -> bool:
         return False
     if user.id == trip.dispatched_by:
         return True
-    return user.role == Role.ADMIN and challan.requested_by == trip.dispatched_by
+    return has(user, P.APPROVALS_DECIDE) and challan.requested_by == trip.dispatched_by
 
 
 def _read(session: Session, challan: Challan, user: User, warnings: list[str] | None = None) -> ChallanRead:
@@ -196,7 +197,7 @@ def _read(session: Session, challan: Challan, user: User, warnings: list[str] | 
         can_approve=challan.status == "requested" and _approver_of(trip, challan, user),
         can_sign=challan.status == "awaiting_driver",
         can_void=challan.status in _OPEN
-        and (user.id in (challan.requested_by, trip.dispatched_by) or user.role == Role.ADMIN),
+        and (user.id in (challan.requested_by, trip.dispatched_by) or has(user, P.APPROVALS_DECIDE)),
     )
 
 
@@ -249,6 +250,7 @@ def approve(session: Session, actor: User, challan_id: uuid.UUID) -> ChallanRead
     route, _, warnings = _check(session, trip, challan.loaded_at, challan.insert_before, _wanted(challan))
     stop_added = route != list(trip.route)
     trip.route = route
+    trip.stop_branch_ids = sorted(set(trip.stop_branch_ids) | set(stop_branches(session, route, [])))
     challan.status = "awaiting_driver"
     challan.approved_by = actor.id
     challan.approved_at = utcnow()
@@ -271,7 +273,7 @@ def void(session: Session, actor: User, challan_id: uuid.UUID, reason: str) -> C
     challan, trip = _challan(session, challan_id)
     if challan.status not in _OPEN:
         raise conflict("Only an addition the driver has not signed for can be voided.")
-    if actor.id not in (challan.requested_by, trip.dispatched_by) and actor.role != Role.ADMIN:
+    if actor.id not in (challan.requested_by, trip.dispatched_by) and not has(actor, P.APPROVALS_DECIDE):
         raise forbidden()
     challan.status = "void"
     challan.voided_by = actor.id

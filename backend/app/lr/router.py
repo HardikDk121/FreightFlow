@@ -6,16 +6,17 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.deps import current_user, require_roles
+from app.deps import current_user
 from app.errors import conflict
+from app.idempotency import IdempotencyHeader, run_once
 from app.lr import service
 from app.lr.printing import COPIES, render_lr_pdf
 from app.lr.schemas import (
     EwayBillUpdate,
     LrCancel,
+    LrCreate,
     LrDefaults,
     PartySuggestion,
-    LrFields,
     LrPreview,
     LrPrintData,
     LrRead,
@@ -23,12 +24,13 @@ from app.lr.schemas import (
     LrSettingsUpdate,
     LrSuggestions,
 )
-from app.models import Company, Role, User
+from app.models import Company, User
+from app.permissions import P, require
 from app.reports.pdf import build_table_report
 
 router = APIRouter(prefix="/lrs", tags=["lr"])
-_booker = require_roles(Role.ADMIN, Role.MANAGER, Role.CLERK)
-_canceller = require_roles(Role.ADMIN, Role.MANAGER)
+_booker = require(P.LR_BOOK)
+_canceller = require(P.LR_CANCEL)
 _PDF = {200: {"content": {"application/pdf": {}}}}
 
 
@@ -55,7 +57,7 @@ def get_settings(user: User = Depends(current_user), session: Session = Depends(
 @router.patch("/settings", response_model=LrSettingsRead)
 def update_settings(
     body: LrSettingsUpdate,
-    actor: User = Depends(require_roles(Role.ADMIN)),
+    actor: User = Depends(require(P.LR_SETTINGS)),
     session: Session = Depends(get_session),
 ) -> LrSettingsRead:
     return LrSettingsRead.model_validate(service.update_settings(session, actor, body))
@@ -81,7 +83,7 @@ def print_preview(
     body: LrPreview, user: User = Depends(current_user), session: Session = Depends(get_session)
 ) -> Response:
     """The LR as a one-page PDF, drawn from the values given. Nothing is saved."""
-    pdf = render_lr_pdf(LrPrintData.model_validate(body), _company(session, user), [""])
+    pdf = render_lr_pdf(LrPrintData.model_validate(body), _company(session, user), [None])
     return _pdf(pdf, f"LR-{body.lr_number}")
 
 
@@ -131,9 +133,17 @@ def lr_register(
 
 
 @router.post("", response_model=LrRead, status_code=status.HTTP_201_CREATED)
-def create_lr(body: LrFields, actor: User = Depends(_booker), session: Session = Depends(get_session)) -> LrRead:
-    """Save the LR with the next number in the series. A saved LR cannot be edited, only cancelled."""
-    return LrRead.model_validate(service.create(session, actor, body))
+def create_lr(
+    body: LrCreate,
+    idempotency_key: IdempotencyHeader = None,
+    actor: User = Depends(_booker),
+    session: Session = Depends(get_session),
+):
+    """Save the LR with the next number in the series. A saved LR cannot be edited, only cancelled.
+    Send an Idempotency-Key so a retried save cannot book the same consignment twice."""
+    return run_once(
+        session, actor, idempotency_key, "POST /lrs", 201, lambda: LrRead.model_validate(service.create(session, actor, body))
+    )
 
 
 @router.get("", response_model=list[LrRead])
@@ -159,16 +169,16 @@ def get_lr(lr_id: uuid.UUID, _: User = Depends(current_user), session: Session =
 @router.get("/{lr_id}/pdf", response_class=Response, responses=_PDF)
 def get_lr_pdf(
     lr_id: uuid.UUID,
-    copy: Literal["all", "consignee", "office", "driver1", "driver2"] = "all",
+    copy: Literal["all", "yellow", "white", "pink"] = "all",
     user: User = Depends(current_user),
     session: Session = Depends(get_session),
 ) -> Response:
-    """The saved LR. `copy=all` gives four pages, one per paper copy; otherwise the one copy named."""
+    """The saved LR. `copy=all` gives three pages, yellow, white and pink; otherwise the one copy named."""
     lr = service.get(session, lr_id)
     if lr.status == "cancelled":
         raise conflict("A cancelled LR cannot be printed.")
-    labels = list(COPIES.values()) if copy == "all" else [COPIES[copy]]
-    pdf = render_lr_pdf(LrPrintData.model_validate(lr), _company(session, user), labels)
+    copies = list(COPIES) if copy == "all" else [copy]
+    pdf = render_lr_pdf(LrPrintData.model_validate(lr), _company(session, user), copies)
     return _pdf(pdf, f"LR-{lr.lr_number}" + ("" if copy == "all" else f"-{copy}"))
 
 

@@ -110,6 +110,8 @@ ThemeData _buildTheme() {
         height: height,
         letterSpacing: spacing,
         color: Palette.onSurface,
+        // Every digit the same width, so amounts and quantities line up in columns and do not jump.
+        fontFeatures: const [FontFeature.tabularFigures()],
       ).copyWith(fontFamilyFallback: fallback);
 
   final text = TextTheme(
@@ -134,6 +136,13 @@ ThemeData _buildTheme() {
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: Palette.background,
+    // Android shows the previous screen as you swipe back (needs enableOnBackInvokedCallback in the manifest).
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+      },
+    ),
     textTheme: text,
     splashFactory: InkSparkle.splashFactory,
     extensions: const [

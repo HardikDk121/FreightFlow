@@ -22,7 +22,15 @@ The rest of this file covers the backend.
 | LR settings | `GET /lrs/settings`, `PATCH /lrs/settings` (admin): number prefix and next number, from city, default ST. charges |
 | E-way bill | `GET /eway/states` (state codes and intra-state limits), `POST /eway/evaluate` (is a bill needed, why, who generates it, Part B, validity), `PATCH /lrs/{id}/eway-bill` (add the number after booking) |
 | Rate matrix | `/stations`, `/routes`, `/rate-rules` (list, get, create, update), `GET /rates/classes`, `POST /rates/quote` (freight with the working shown) |
-| Payments | `POST /lrs/{id}/payments`, `GET /lrs/{id}/account`, `GET /receivables` (by party), `GET /receivables/lrs?party=` |
+| Payments | `GET /lrs/{id}/account` (what an LR owes and every collection set against it), `GET /receivables`, `GET /receivables/lrs?party=` |
+| Collections | `POST /receipts` (money receipt for one payer's LRs; amount from the LRs), `GET /receipts`, `GET /receipts/{id}`, `GET /receipts/{id}/pdf`, `POST /receipts/{id}/cancel`, `POST /receipts/{id}/visits` (paid, part paid, come later, refused), `POST /collections/{id}/fail`, `GET /custody`, `GET /custody/me`, `POST /handovers`, `POST /handovers/{id}/confirm`, `POST /deposits`, `GET/PUT /credit-terms`, `POST /lrs/{id}/release-approval`, `POST /lrs/{id}/gate-pass`, `GET /shortages`, `POST /shortages/{id}/decide`, `GET /collections/overview`, `GET /collections/daily-summary`; public `GET /r/{token}` (the receipt check page its QR opens) |
+| Bank | `POST /bank/statements/preview`, `POST /bank/statements` (CSV, XLS or XLSX; layout found by column names and remembered), `GET /bank/lines`, `POST /bank/lines/{id}/match`, `/allocate`, `/ignore` |
+| Branches | `GET /branches`, `POST /branches`, `PUT /branches/{id}` (cities each branch delivers) |
+| Delivery | `POST /gate-passes` (one consignee, several LRs), `GET /gate-passes`, `GET /gate-passes/{id}`, `/pdf`, `/photo`, `POST /gate-passes/{id}/delivery` (proof: signature, time, place, photo; multipart), `POST /gate-passes/{id}/void` |
+| Approvals | `POST /lrs/{id}/release-request`, `GET /approvals`, `POST /approvals/{id}/decide` |
+| Tasks | `GET /tasks?scope=mine|all`, `POST /tasks/{id}/attempts`, `POST /tasks/{id}/assign` |
+| Reminders | `POST /reminders/run`, `GET /reminders?payer=` |
+| Operations | `GET /dashboard/operations` (whole business for the owner; one branch for a branch manager) |
 | Invoice scan | `POST /invoices/scan` (photo upload): reads consignor, consignee, GST numbers, city, goods, value and e-way bill number. Nothing is saved and the photo is not kept. |
 | Pending | `GET /pending` (by destination), `GET /pending/lrs?destination=&older_than_days=` (oldest first) |
 | Trips | `GET /trips/suggestions` (which truck for which route), `POST /trips/plan` (load for a truck and its stops), `POST /trips` (dispatch to one or more stops, partial loads allowed), `POST /trips/{id}/stops/{city}/deliver` (unload a whole stop), `GET /trips`, `GET /trips/{id}`, `POST /trips/{id}/lines/{line_id}/deliver`, `POST /trips/{id}/lines/{line_id}/undo-delivery` (admin, manager), `GET /trips/{id}/load-sheet.pdf` |
@@ -109,6 +117,37 @@ the running backend.
   each issued challan carries a hash chained to the one before it, so direct tampering shows as
   `sealed: false`. Every request is re-checked at approval and at sign-off: stop order, pending
   packages, e-way bills, and weight and space on every remaining leg.
+- **Money is collected so no one person controls it.** What is due comes from the sealed LR; a money
+  receipt is issued by the app with that amount; the collector records each visit; the customer is
+  messaged (SMS and WhatsApp, once a provider is plugged into `Outbox`); cash is counted at handover by a
+  second person and banked in a numbered deposit; the bank statement confirms UPI by UTR, cheques by
+  number and deposits by batch number or unambiguous amount. Collections, handovers and deposits are
+  insert-only for the API's database role; balances are always worked out from them (`collections/balances.py`).
+  A collector may take up to `collector_cash_limit` (Rs 25,000) in cash per receipt; nobody may take
+  Rs 2 lakh or more in cash from one customer in a day.
+- **Freight is never typed.** Each LR records its charge basis: per kg (rate x chargeable weight), per
+  article (rate x packages) or the rate matrix, which the server prices again. LRs saved before the basis
+  existed keep their freight (`charge_basis` null). The LR prints in three copies: yellow, white, pink.
+- **Customer payment terms** (`credit_terms`): advance, before delivery, at delivery (the default for anyone
+  without terms) or credit with a limit and days. Due dates follow the terms (`collections/credit.py`).
+  From `lr_settings.credit_controls_from`, a payer over their limit or overdue by more than
+  `overdue_hold_days` cannot be booked except by an admin with a reason. Reports: `/receivables/ageing`,
+  `/receivables/priorities`.
+- **Idempotency keys.** Booking, receipts, visits, handovers, deposits, dispatch and bank allocations accept
+  an `Idempotency-Key` header; a retry with the same key returns the first answer (`app/idempotency.py`).
+- **Branches are enforced by the database.** Every request sets `app.branches` ('all' for the owner and
+  people with no branch, else the user's branch). Restrictive row-level policies on LRs, trips, receipts,
+  collections, handovers, deposits, shortages, gate passes, tasks and approvals AND this with the company
+  policy. An LR belongs to its booking branch and to the branch that delivers its destination city.
+- **Permissions, not roles, guard every endpoint** (`app/permissions.py`). A role gives defaults; the
+  owner grants or revokes single permissions per person. Owner-level permissions (`SENSITIVE`) can only be
+  given by an owner. The app reads `/me.permissions` to decide what to offer; the server checks again.
+- **Proof of delivery is the signed gate pass.** Due dates count from the consignee's signature. Only
+  `delivery.correct` can undo it, with a reason; the proof stays on record. Proofs taken offline carry
+  the phone's signing time and an idempotency key, so a late or repeated send is recorded once.
+- **The daily job** creates and closes collection tasks and sends reminders for every company:
+  `docker compose run --rm api python -m app.jobs daily`, from cron each morning. Opening a task list or
+  the operations dashboard also refreshes tasks, so they are right even before the job runs.
 - **Adding a tenant table.** Add it to `TENANT_TABLES` in a new migration so it gets the policy and grants.
 
 ## Adjusting the printed LR

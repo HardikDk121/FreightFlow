@@ -20,22 +20,23 @@ def _pages(response) -> list[str]:
     return [page.extract_text() for page in PdfReader(io.BytesIO(response.content)).pages]
 
 
-def test_lr_prints_four_labelled_copies_with_the_companys_own_header(client, admin):
+def test_lr_prints_three_coloured_copies_with_the_companys_own_header(client, admin):
     h = bearer(admin)
     assert client.patch("/company", json=HEADER, headers=h).status_code == 200
     lr = _create(client, admin)
 
     pages = _pages(client.get(f"/lrs/{lr['id']}/pdf", headers=h))
-    assert len(pages) == 4
-    for page, label in zip(pages, ("CONSIGNEE COPY", "OFFICE COPY", "DRIVER COPY 1", "DRIVER COPY 2")):
+    assert len(pages) == 3
+    for page, label in zip(pages, ("YELLOW COPY", "WHITE COPY", "PINK COPY")):
         assert label in page and lr["lr_number"] in page
         for text in ("SHARMA LOGISTICS", "FLEET OWNERS & TRANSPORT CONTRACTORS", "GSTIN: 24CPAPS7855E2ZO",
                      "Contact No: 9327410932", "SHRI NATH CARGO OLD MORVI ROAD RAJKOT,"):
             assert text in page, text
 
-    driver = _pages(client.get(f"/lrs/{lr['id']}/pdf", params={"copy": "driver1"}, headers=h))
-    assert len(driver) == 1 and "DRIVER COPY 1" in driver[0] and "OFFICE COPY" not in driver[0]
-    assert client.get(f"/lrs/{lr['id']}/pdf", params={"copy": "spare"}, headers=h).status_code == 422
+    pink = _pages(client.get(f"/lrs/{lr['id']}/pdf", params={"copy": "pink"}, headers=h))
+    assert len(pink) == 1 and "PINK COPY" in pink[0] and "WHITE COPY" not in pink[0]
+    for retired in ("driver1", "consignee", "spare"):
+        assert client.get(f"/lrs/{lr['id']}/pdf", params={"copy": retired}, headers=h).status_code == 422
 
 
 def test_company_address_must_fit_the_header(client, admin):

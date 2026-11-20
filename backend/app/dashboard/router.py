@@ -8,14 +8,15 @@ from sqlalchemy.orm import Session
 
 from app.clock import start_of, today
 from app.db import get_session
-from app.deps import current_user, require_roles
+from app.deps import current_user
 from app.dispatch import additions
 from app.dispatch import service as dispatch_service
 from app.dispatch.addition_schemas import ChallanRead
 from app.dispatch.schemas import PendingDestination
-from app.models import Lr, Role, Trip, Truck, User
+from app.models import Lr, Trip, Truck, User
 from app.payments import service as payments_service
 from app.payments.schemas import PartyOutstanding
+from app.permissions import P, require
 from app.security import utcnow
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -95,7 +96,7 @@ class AdminDashboard(BaseModel):
 
 @router.get("/admin", response_model=AdminDashboard)
 def admin_dashboard(
-    admin: User = Depends(require_roles(Role.ADMIN)), session: Session = Depends(get_session)
+    admin: User = Depends(require(P.DASHBOARD_OWNER)), session: Session = Depends(get_session)
 ) -> AdminDashboard:
     """The owner's view: fleet, trips, freight booked, money owed, and e-way bills about to lapse."""
     day = today()

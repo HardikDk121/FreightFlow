@@ -7,6 +7,8 @@ import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../admin/admin_dashboard_screen.dart' show rateMatrixScreen;
 import '../masterdata/master_data_screen.dart';
+import '../money/money_screen.dart';
+import '../ops/ops_screens.dart';
 import '../payments/payments_screens.dart';
 import '../team/users_screen.dart';
 import 'lr_settings_screen.dart';
@@ -30,10 +32,13 @@ class AccountScreen extends StatelessWidget {
       (Icons.lock_outline, 'Password', const ChangePasswordScreen()),
       (Icons.inventory_2_outlined, 'Master data', MasterDataScreen.masterData()),
       if (user.canEditMasterData) (Icons.price_change_outlined, 'Rate matrix', rateMatrixScreen()),
+      if (user.worksWithMoney) (Icons.payments_outlined, 'Collections', const MoneyScreen()),
       if (user.canSeeMoney) (Icons.account_balance_wallet_outlined, 'Receivables', const ReceivablesScreen()),
-      if (user.isAdmin) (Icons.group_outlined, 'Team', const UsersScreen()),
-      if (user.isAdmin) (Icons.apartment_outlined, 'Company / LR header', const CompanyScreen()),
-      if (user.isAdmin) (Icons.tune, 'LR settings', const LrSettingsScreen()),
+      if (user.canRequestApproval || user.canDecideApproval) (Icons.how_to_vote_outlined, 'Approvals', const ApprovalsScreen()),
+      if (user.canManageUsers) (Icons.group_outlined, 'Team and permissions', const UsersScreen()),
+      if (user.canManageBranches) (Icons.account_tree_outlined, 'Branches', const BranchesScreen()),
+      if (user.can('company.settings')) (Icons.apartment_outlined, 'Company / LR header', const CompanyScreen()),
+      if (user.can('lr.settings')) (Icons.tune, 'LR settings', const LrSettingsScreen()),
     ];
 
     return Scaffold(
@@ -231,6 +236,7 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
   final _address = TextEditingController();
   final _gstin = TextEditingController();
   final _phone = TextEditingController();
+  final _bank = TextEditingController();
   bool _loaded = false;
   String? _loadError;
 
@@ -242,7 +248,7 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
 
   @override
   void dispose() {
-    for (final c in [_name, _tagline, _address, _gstin, _phone]) {
+    for (final c in [_name, _tagline, _address, _gstin, _phone, _bank]) {
       c.dispose();
     }
     super.dispose();
@@ -264,6 +270,7 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
       _address.text = company['address'] as String? ?? '';
       _gstin.text = company['gstin'] as String? ?? '';
       _phone.text = company['phone'] as String? ?? '';
+      _bank.text = company['bank_details'] as String? ?? '';
       setState(() => _loaded = true);
     } on ApiException catch (e) {
       if (mounted) setState(() => _loadError = e.message);
@@ -278,6 +285,7 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
       'address': orNull(_address),
       'gstin': orNull(_gstin),
       'phone': orNull(_phone),
+      'bank_details': orNull(_bank),
     });
     if (mounted) Navigator.of(context).pop();
   }
@@ -328,7 +336,23 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
           helper: 'Up to 3 lines of 48 characters, printed top right on the LR.',
         ),
         AppTextField(label: 'GSTIN', controller: _gstin, capitalization: TextCapitalization.characters),
-        AppTextField(label: 'Contact number', controller: _phone, keyboardType: TextInputType.phone),
+        AppTextField(
+          label: 'Contact number',
+          controller: _phone,
+          keyboardType: TextInputType.phone,
+          helper: 'Customers are told to call this number if a payment message looks wrong. Use the owner\'s.',
+        ),
+        AppTextField(
+          label: 'Bank details for payments',
+          controller: _bank,
+          lines: 4,
+          check: (v) {
+            final lines = v.split('\n').where((l) => l.trim().isNotEmpty);
+            if (lines.length > 4) return 'Up to 4 lines fit on the receipt';
+            return lines.any((l) => l.trim().length > 60) ? 'Each line can be up to 60 characters' : null;
+          },
+          helper: 'Account name, number and IFSC. Printed on every money receipt so customers pay the company, never a person.',
+        ),
       ],
     );
   }

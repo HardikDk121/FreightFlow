@@ -1,32 +1,21 @@
 import datetime as dt
 import uuid
 from decimal import Decimal
-from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-
-Mode = Literal["cash", "upi", "neft", "cheque"]
-Short = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
-
-
-class PaymentCreate(BaseModel):
-    amount: Annotated[Decimal, Field(gt=0, le=Decimal("99999999.99"), decimal_places=2)]
-    mode: Mode
-    # UPI or NEFT reference, or cheque number.
-    reference: Short | None = None
-    note: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)] | None = None
-    received_on: dt.date | None = None  # today when left out
-
+from pydantic import BaseModel
 
 class PaymentRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    """Money set against this LR, from one collection."""
 
-    id: uuid.UUID
+    collection_id: uuid.UUID
     amount: Decimal
-    mode: str
+    method: str
+    # pending (not yet seen by the bank), confirmed, failed, legacy (recorded before these controls)
+    status: str
     reference: str | None
-    note: str | None
-    received_on: dt.date
+    receipt_number: str | None
+    collected_by: str
+    collected_on: dt.date
 
 
 class LrAccount(BaseModel):
@@ -53,9 +42,59 @@ class PartyOutstanding(BaseModel):
     outstanding: Decimal
     overdue: Decimal
     oldest_lr_date: dt.date
+    # advance, before_delivery, at_delivery (the default for anyone without terms) or credit
+    payment_terms: str
+    credit_days: int | None
+    credit_limit: Decimal | None
 
 
 class Receivables(BaseModel):
     outstanding: Decimal
     overdue: Decimal
     parties: list[PartyOutstanding]
+
+
+class AgeingRow(BaseModel):
+    party: str
+    not_due: Decimal = Decimal(0)
+    days_0_7: Decimal = Decimal(0)
+    days_8_15: Decimal = Decimal(0)
+    days_16_30: Decimal = Decimal(0)
+    days_31_60: Decimal = Decimal(0)
+    days_60_plus: Decimal = Decimal(0)
+    total: Decimal = Decimal(0)
+
+
+class Ageing(BaseModel):
+    """Outstanding money by days past its due date."""
+
+    rows: list[AgeingRow]
+    totals: AgeingRow
+
+
+class OverdueLr(BaseModel):
+    party: str
+    lr_number: str
+    balance: Decimal
+    days_overdue: int
+
+
+class LimitUse(BaseModel):
+    party: str
+    outstanding: Decimal
+    credit_limit: Decimal
+    used_pct: int
+
+
+class LatePayer(BaseModel):
+    party: str
+    lrs_paid: int
+    lrs_paid_late: int
+    average_days_late: int
+
+
+class Priorities(BaseModel):
+    largest: list[PartyOutstanding]
+    oldest_overdue: list[OverdueLr]
+    near_limit: list[LimitUse]
+    late_payers: list[LatePayer]

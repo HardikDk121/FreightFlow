@@ -10,6 +10,7 @@ SAMPLE = {
     "from_city": "Rajkot",
     "to_city": "Raipur",
     "freight_by": "ToPay",
+    "charge_basis": "per_kg",
     "consignor_name": "Rangoli Laminate",
     "consignor_gstin": "24AABCR4141H1ZQ",
     "consignee_name": "Jalaram Enterprise",
@@ -45,7 +46,7 @@ def test_preview_prints_the_form_and_the_values(client, admin):
 
 
 def test_total_is_the_sum_of_the_charges(client, admin):
-    body = {**SAMPLE, "freight": "1200.5", "hamali": "50", "other_charges": "10", "st_charges": "35"}
+    body = {**SAMPLE, "charge_basis": "per_article", "rate": "600.25", "freight": "1200.5", "hamali": "50", "other_charges": "10", "st_charges": "35"}
     text = _text(client.post("/lrs/print-preview", json=body, headers=bearer(admin)).content)
     assert "1295.50" in text
 

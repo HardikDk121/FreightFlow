@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db import get_session
-from app.deps import current_user, require_roles
+from app.deps import current_user
 from app.dispatch import service
 from app.dispatch.schemas import (
     DispatchRequest,
@@ -16,11 +16,13 @@ from app.dispatch.schemas import (
     Suggestion,
     TripRead,
 )
-from app.models import Company, Role, User
+from app.idempotency import IdempotencyHeader, run_once
+from app.models import Company, User
+from app.permissions import P, require
 from app.reports.pdf import build_table_report
 
 router = APIRouter(tags=["dispatch"])
-_dispatcher = require_roles(Role.ADMIN, Role.MANAGER, Role.DISPATCHER)
+_dispatcher = require(P.DISPATCH)
 
 
 @router.get("/pending", response_model=list[PendingDestination])
@@ -56,9 +58,13 @@ def trip_suggestions(_: User = Depends(_dispatcher), session: Session = Depends(
 
 @router.post("/trips", response_model=TripRead, status_code=status.HTTP_201_CREATED)
 def dispatch_trip(
-    body: DispatchRequest, actor: User = Depends(_dispatcher), session: Session = Depends(get_session)
-) -> TripRead:
-    return service.dispatch(session, actor, body)
+    body: DispatchRequest,
+    idempotency_key: IdempotencyHeader = None,
+    actor: User = Depends(_dispatcher),
+    session: Session = Depends(get_session),
+):
+    """Send the truck out. Send an Idempotency-Key so a retried dispatch cannot create a second trip."""
+    return run_once(session, actor, idempotency_key, "POST /trips", 201, lambda: service.dispatch(session, actor, body))
 
 
 @router.get("/trips", response_model=list[TripRead])
@@ -105,7 +111,7 @@ def deliver_stop(
 def undo_delivery(
     trip_id: uuid.UUID,
     line_id: uuid.UUID,
-    actor: User = Depends(require_roles(Role.ADMIN, Role.MANAGER)),
+    actor: User = Depends(require(P.TRIP_UNDO_DELIVERY)),
     session: Session = Depends(get_session),
 ) -> TripRead:
     """Reverse a delivery marked by mistake. Admins and managers only; the reversal is audited."""

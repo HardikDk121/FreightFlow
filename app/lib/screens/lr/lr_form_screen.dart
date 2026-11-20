@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../../api/api_client.dart';
 import '../../format.dart';
+import '../../state/session.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/suggest_field.dart';
@@ -88,6 +89,9 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   // with none, freight is rate x charged weight.
   List<String> _goodsClasses = const [];
   String _goodsClass = '';
+
+  /// With no class of goods chosen: freight is rate x chargeable weight, or rate x articles.
+  String _basis = 'per_kg';
   String? _rateRuleId;
   String? _quoteProblem;
   Timer? _quoteDebounce;
@@ -203,12 +207,24 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
       _calculate('charged_weight', _chargedWeight, _plain(weight), 'Same as the weight');
     }
     if (_goodsClass.isNotEmpty) return; // the rate matrix prices it; see _quote
+    // Freight is never typed: the server checks it equals rate x quantity, so it is always worked out.
     final rate = double.tryParse(_rate.text.trim());
-    final charged = double.tryParse(_chargedWeight.text.trim());
-    if (rate != null && rate > 0 && charged != null && charged > 0) {
-      _calculate('freight', _freight, (rate * charged).toStringAsFixed(2), '${_plain(rate)} per kg × ${_plain(charged)} kg');
+    final quantity = _basis == 'per_kg'
+        ? double.tryParse(_chargedWeight.text.trim())
+        : int.tryParse(_packages.text.trim())?.toDouble();
+    if (rate != null && rate > 0 && quantity != null && quantity > 0) {
+      _freight.text = (rate * quantity).toStringAsFixed(2);
+      _freightWorking = _basis == 'per_kg'
+          ? '${_plain(quantity)} kg × ₹${_plain(rate)} per kg'
+          : '${quantity.toInt()} articles × ₹${_plain(rate)} per article';
+    } else {
+      _freight.clear();
+      _freightWorking = _basis == 'per_kg' ? 'Enter the rate per kg.' : 'Enter the rate per article.';
     }
   }
+
+  /// How the freight shown was worked out, under the freight figure.
+  String _freightWorking = 'Enter the rate per kg.';
 
   /// Ask the server to price the freight from the rate matrix, once typing pauses.
   void _scheduleQuote() {
@@ -242,7 +258,8 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
         _quoteProblem = null;
         _rateRuleId = q['rate_rule_id'] as String;
         final working = (q['explanation'] as List).cast<String>();
-        _calculate('freight', _freight, q['freight'] as String, working.skip(1).join('. '));
+        _freight.text = q['freight'] as String;
+        _freightWorking = working.skip(1).join('. ');
         final perKg = q['rate_per_kg'] as String?;
         if (perKg != null) _calculate('rate', _rate, perKg, working.first);
       });
@@ -481,7 +498,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     final api = context.read<ApiClient>();
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final scan = await api.postImage('/invoices/scan', await photo.readAsBytes(), photo.name) as Map<String, dynamic>;
+      final scan = await api.postFile('/invoices/scan', await photo.readAsBytes(), photo.name) as Map<String, dynamic>;
       if (!mounted) return;
       final before = _filledByApp.length;
       setState(() {
@@ -617,6 +634,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
       'weight': _weight.text.trim(),
     };
     if (_goodsClass.isNotEmpty && _rateRuleId != null) body['rate_rule_id'] = _rateRuleId;
+    body['charge_basis'] = _goodsClass.isNotEmpty ? 'matrix' : _basis;
     final optional = {
       'consignor_gstin': _consignorGstin,
       'consignee_gstin': _consigneeGstin,
@@ -991,18 +1009,55 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
               _quoteProblem = null;
               _rateRuleId = null;
               // Hand the rate and freight back to whichever method now applies.
-              for (final key in ['rate', 'freight']) {
-                if (_calculated.remove(key) != null) (key == 'rate' ? _rate : _freight).clear();
-              }
+              if (_calculated.remove('rate') != null) _rate.clear();
+              _freight.clear();
               _recalculate();
               _scheduleQuote();
             }),
           ),
         if (_quoteProblem != null)
           Padding(padding: const EdgeInsets.only(bottom: 16), child: ErrorBanner(_quoteProblem!)),
-        _pair(
-          _number('rate', 'Rate per kg', _rate, check: _checkRate, unit: 'Rs'),
-          _number('freight', 'Freight', _freight, unit: 'Rs'),
+        if (_goodsClass.isEmpty)
+          ChoiceField<String>(
+            label: 'Charge by',
+            options: const {'per_kg': 'Per kg', 'per_article': 'Per article'},
+            value: _basis,
+            onChanged: (v) => setState(() {
+              _basis = v;
+              _recalculate();
+            }),
+          ),
+        _number(
+          'rate',
+          _basis == 'per_article' && _goodsClass.isEmpty ? 'Rate per article' : 'Rate per kg',
+          _rate,
+          check: _checkRate,
+          unit: 'Rs',
+        ),
+        // The freight, worked out, with how.
+        ListenableBuilder(
+          listenable: _freight,
+          builder: (_, __) => Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: AppCard(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Freight', style: text.labelMedium!.copyWith(color: Palette.onSurfaceVariant)),
+                        const SizedBox(height: 2),
+                        Text(_freightWorking, style: text.bodySmall!.copyWith(color: Palette.onSurfaceMuted)),
+                      ],
+                    ),
+                  ),
+                  Text(rupees(double.tryParse(_freight.text) ?? 0), style: text.titleLarge),
+                ],
+              ),
+            ),
+          ),
         ),
         _pair(
           _number('hamali', 'Hamali', _hamali, unit: 'Rs'),
@@ -1030,6 +1085,19 @@ class _LrConfirmScreenState extends State<LrConfirmScreen> {
   bool _busy = false;
   String? _error;
 
+  /// One key for this LR, however many times saving is retried, so it is booked once.
+  final _key = newIdempotencyKey();
+
+  /// Set when the owner books for a customer on hold, with the reason they gave.
+  String? _override;
+
+  Future<void> _askOverride(String message) async {
+    final reason = await showDialog<String>(context: context, builder: (_) => _OverrideDialog(message: message));
+    if (reason == null || !mounted) return;
+    _override = reason;
+    await _confirmAndPrint();
+  }
+
   Future<void> _confirmAndPrint() async {
     setState(() {
       _busy = true;
@@ -1039,14 +1107,19 @@ class _LrConfirmScreenState extends State<LrConfirmScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final Map<String, dynamic> lr;
     try {
-      lr = await api.post('/lrs', widget.fields) as Map<String, dynamic>;
+      lr = await api.post(
+        '/lrs',
+        {...widget.fields, if (_override != null) 'credit_override_reason': _override},
+        idempotencyKey: _key,
+      ) as Map<String, dynamic>;
     } on ApiException catch (e) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = e.message;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.message;
+      });
+      final isOwner = context.read<Session>().user?.can('credit.override') ?? false;
+      if (e.code == 'credit_hold' && isOwner && _override == null) await _askOverride(e.message);
       return;
     }
     // Saved from here on: whatever happens with the printer, leave this screen.
@@ -1086,5 +1159,53 @@ class _LrConfirmScreenState extends State<LrConfirmScreen> {
             ),
           ],
         ),
+      );
+}
+
+
+/// The owner books for a customer on hold anyway, saying why. The reason is kept on the LR.
+class _OverrideDialog extends StatefulWidget {
+  const _OverrideDialog({required this.message});
+
+  final String message;
+
+  @override
+  State<_OverrideDialog> createState() => _OverrideDialogState();
+}
+
+class _OverrideDialogState extends State<_OverrideDialog> {
+  final _reason = TextEditingController();
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Book anyway?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.message),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _reason,
+              autofocus: true,
+              maxLength: 200,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(hintText: 'Why, for the record'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Do not book')),
+          TextButton(
+            onPressed: _reason.text.trim().length < 3 ? null : () => Navigator.of(context).pop(_reason.text.trim()),
+            child: const Text('Book with this reason'),
+          ),
+        ],
       );
 }

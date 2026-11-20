@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import audit
+from app import audit, branches
 from app.clock import midnight_after, today
 from app.dispatch.schemas import (
     DispatchRequest,
@@ -299,6 +299,13 @@ def is_sealed(session: Session, challan: Challan) -> bool | None:
     return _content_hash(session, challan) == challan.content_hash
 
 
+def stop_branches(session: Session, stops: list[str], lrs) -> list[uuid.UUID]:
+    """The branches that deliver at this trip's stops: they see the trip, to unload and deliver it."""
+    found = {lr.delivery_branch_id for lr in lrs if lr.delivery_branch_id}
+    found |= {b for b in (branches.delivering_branch(session, city) for city in stops) if b}
+    return sorted(found)
+
+
 def _trip_read(session: Session, trip: Trip) -> TripRead:
     truck = session.get_one(Truck, trip.truck_id)
     rows = session.execute(
@@ -393,6 +400,8 @@ def dispatch(session: Session, actor: User, data: DispatchRequest) -> TripRead:
     trip = Trip(
         company_id=actor.company_id,
         truck_id=truck.id,
+        branch_id=branches.home_branch(session, actor),
+        stop_branch_ids=stop_branches(session, data.stops, lrs),
         trip_no=lr_service.take_trip_number(session, actor.company_id),
         route=data.stops,
         destination=data.stops[-1],

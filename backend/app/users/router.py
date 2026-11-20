@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.auth.schemas import TokenPair
 from app.db import get_session
-from app.deps import current_user, require_roles
-from app.models import Role, User
+from app.deps import current_user
+from app.models import User
+from app.permissions import P, require
 from app.users import service
 from app.users.schemas import (
     AdminPasswordReset,
@@ -19,7 +20,7 @@ from app.users.schemas import (
 )
 
 router = APIRouter(tags=["users"])
-_admin = require_roles(Role.ADMIN)
+_admin = require(P.USERS_MANAGE)
 
 
 @router.get("/me", response_model=UserRead)

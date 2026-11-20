@@ -10,7 +10,7 @@ from app.auth.schemas import AcceptInviteRequest, RegisterRequest, TokenPair
 from app.config import get_settings
 from app.db import SessionLocal, set_tenant
 from app.errors import AppError, conflict, unauthorized
-from app.models import AuthToken, Company, Role, User, UserInvite
+from app.models import AuthToken, Branch, Company, Role, User, UserInvite
 from app.security import (
     company_id_from_token,
     encode_access_token,
@@ -66,6 +66,8 @@ def register(session: Session, data: RegisterRequest) -> TokenPair:
     company = Company(id=uuid.uuid4(), name=data.company_name)
     set_tenant(session, company.id)
     session.add(company)
+    session.flush()
+    session.add(Branch(company_id=company.id, name="Head office", is_head_office=True))
     session.flush()
     user = User(
         company_id=company.id,
@@ -159,6 +161,7 @@ def accept_invite(session: Session, data: AcceptInviteRequest) -> TokenPair:
         phone=data.phone,
         password_hash=hash_password(data.password),
         role=invite.role,
+        branch_id=invite.branch_id,
     )
     add_user(session, user)
     invite.accepted_at = utcnow()

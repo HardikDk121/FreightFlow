@@ -96,3 +96,24 @@ def test_pending_can_be_listed_for_several_stops_at_once(client, admin):
     _lr(client, h, packages=1, to_city="Raipur")
     both = client.get("/pending/lrs", params={"destination": "Dhamtari, Jagdalpur"}, headers=h).json()
     assert sorted(x["to_city"] for x in both) == ["Dhamtari", "Jagdalpur"]
+
+
+def test_suggest_a_load_in_the_situations_the_app_meets(client, admin):
+    """The planner answers every case with a plan the app can show, never an error it cannot explain."""
+    h = bearer(admin)
+    truck = _truck(client, h)
+    plan = lambda stops: client.post("/trips/plan", json={"truck_id": truck, "stops": stops}, headers=h)
+    # nothing waiting: an empty plan, not an error
+    empty = plan(["Raipur"]).json()
+    assert (empty["lines"], empty["weight_only"], empty["unsized"], empty["too_big"]) == ([], [], [], [])
+    # stops typed in any case match LRs saved in any case
+    _lr(client, h, packages=3, to_city="raipur")
+    assert [line["load"] for line in plan(["RAIPUR"]).json()["lines"]] == [3]
+    assert [line["load"] for line in plan(["Raipur"]).json()["lines"]] == [3]
+    # a deactivated truck is refused clearly
+    client.patch(f"/trucks/{truck}", json={"is_active": False}, headers=h)
+    gone = plan(["Raipur"])
+    assert gone.status_code == 404 and gone.json()["error"]["message"] == "Truck not found."
+    # repeated stops are refused before planning
+    client.patch(f"/trucks/{truck}", json={"is_active": True}, headers=h)
+    assert plan(["Raipur", "RAIPUR"]).status_code == 422
