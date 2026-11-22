@@ -14,24 +14,23 @@ key.properties
 backend/build/
 
 # Local environment and secrets. Keep the checked-in template.
-.env
 .env.*
 !.env.example
 !.env.*.example
-*.pem
+
 *.key
 secrets/
 
 # Python backend
-__pycache__/
+
 *.py[cod]
 *$py.class
-.pytest_cache/
+
 .mypy_cache/
 .ruff_cache/
 .coverage
 htmlcov/
-*.egg-info/
+
 .venv/
 venv/
 env/
@@ -40,11 +39,10 @@ build/
 dist/
 
 # Flutter / Dart app
-app/.dart_tool/
+
 app/.flutter-plugins
 app/.flutter-plugins-dependencies
 app/.packages
-app/build/
 app/coverage/
 app/.pub-cache/
 app/pubspec.lock
