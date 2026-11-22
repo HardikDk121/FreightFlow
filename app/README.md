@@ -48,6 +48,7 @@ One codebase builds both platforms; nothing in `lib/` is Android-specific.
 - The name under the icon: set `CFBundleDisplayName` to `FreightFlow` in `ios/Runner/Info.plist`. For
   proof of delivery, add `NSCameraUsageDescription` and `NSLocationWhenInUseUsageDescription` with a
   sentence each ("To photograph the signed gate pass", "To record where goods were delivered").
+- In `ios/Podfile`, set `platform :ios, '14.0'` (the file picker needs iOS 14).
 - Building for iOS needs a Mac with Xcode. Run `cd ios && pod install` once, then `flutter run` with a
   simulator open.
 - While the backend is plain `http`, add this to `ios/Runner/Info.plist`, and remove it once the backend

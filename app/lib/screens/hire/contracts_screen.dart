@@ -159,53 +159,69 @@ class _ContractFormState extends State<_ContractForm> with Submitter {
 
   @override
   Widget build(BuildContext context) => FormPage(
-        title: widget.contract == null ? 'New contract' : 'Edit contract',
-        formKey: formKey,
-        busy: busy,
-        error: error,
-        submitLabel: 'Save contract',
-        onSubmit: () => submit(_save),
+    title: widget.contract == null ? 'New contract' : 'Edit contract',
+    formKey: formKey,
+    busy: busy,
+    error: error,
+    submitLabel: 'Save contract',
+    onSubmit: () => submit(_save),
+    children: [
+      AppTextField(label: 'Customer (who pays)', controller: _party, mandatory: true, minLength: 2, capitalization: TextCapitalization.words),
+      Row(
         children: [
-          AppTextField(label: 'Customer (who pays)', controller: _party, mandatory: true, minLength: 2, capitalization: TextCapitalization.words),
-          Row(
-            children: [
-              Expanded(child: PickerField(label: 'From', value: dayLabel(_starts.toIso8601String().substring(0, 10)), icon: Icons.calendar_today_outlined, onTap: () => _pick(true))),
-              const SizedBox(width: 10),
-              Expanded(child: PickerField(label: 'To', value: dayLabel(_ends.toIso8601String().substring(0, 10)), icon: Icons.calendar_today_outlined, onTap: () => _pick(false))),
-            ],
-          ),
-          const SectionHeader('Agreed rates', icon: Icons.currency_rupee),
-          for (final r in _rates)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 3, child: AppTextField(label: 'Destination', controller: r.destination, capitalization: TextCapitalization.characters)),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: ChoiceField<String>(label: 'Per', options: const {'per_kg': 'kg', 'per_article': 'article'}, value: r.basis, onChanged: (v) => setState(() => r.basis = v)),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: AppTextField(
-                    label: 'Rate',
-                    controller: r.rate,
-                    unit: 'Rs',
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    check: (v) => r.destination.text.trim().isEmpty || (double.tryParse(v) ?? 0) > 0 ? null : 'Rate',
-                  ),
-                ),
-              ],
+          Expanded(
+            child: PickerField(
+              label: 'From',
+              placeholder: 'Select start date',
+              value: dayLabel(_starts.toIso8601String().substring(0, 10)),
+              icon: Icons.calendar_today_outlined,
+              onTap: () => _pick(true),
             ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(icon: const Icon(Icons.add), label: const Text('Another destination'), onPressed: () => setState(() => _rates.add(_RateRow()))),
           ),
-          AppTextField(label: 'Terms', controller: _terms, lines: 3, capitalization: TextCapitalization.sentences, helper: 'Anything else agreed: billing cycle, minimum load, who pays hamali.'),
-          if (widget.contract != null) SwitchField(label: 'In force', value: _active, onChanged: (v) => setState(() => _active = v)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: PickerField(
+              label: 'To',
+              placeholder: 'Select end date',
+              value: dayLabel(_ends.toIso8601String().substring(0, 10)),
+              icon: Icons.calendar_today_outlined,
+              onTap: () => _pick(false),
+            ),
+          ),
         ],
-      );
+      ),
+      const SectionHeader('Agreed rates', icon: Icons.currency_rupee),
+      for (final r in _rates)
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(flex: 3, child: AppTextField(label: 'Destination', controller: r.destination, capitalization: TextCapitalization.characters)),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: ChoiceField<String>(label: 'Per', options: const {'per_kg': 'kg', 'per_article': 'article'}, value: r.basis, onChanged: (v) => setState(() => r.basis = v)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: AppTextField(
+                label: 'Rate',
+                controller: r.rate,
+                unit: 'Rs',
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                check: (v) => r.destination.text.trim().isEmpty || (double.tryParse(v) ?? 0) > 0 ? null : 'Rate',
+              ),
+            ),
+          ],
+        ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(icon: const Icon(Icons.add), label: const Text('Another destination'), onPressed: () => setState(() => _rates.add(_RateRow()))),
+      ),
+      AppTextField(label: 'Terms', controller: _terms, lines: 3, capitalization: TextCapitalization.sentences, helper: 'Anything else agreed: billing cycle, minimum load, who pays hamali.'),
+      if (widget.contract != null) SwitchField(label: 'In force', value: _active, onChanged: (v) => setState(() => _active = v)),
+    ],
+  );
 }
 
 /// What the office tells customers each destination usually takes. Used to judge late trips; not a promise.

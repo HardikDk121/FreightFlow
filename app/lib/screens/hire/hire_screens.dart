@@ -698,6 +698,7 @@ class _RfqFormState extends State<_RfqForm> with Submitter {
           AppTextField(label: 'Truck type', controller: _truckType, hint: 'e.g. 32 ft closed body'),
           PickerField(
             label: 'Needed on',
+            placeholder: 'Select date',
             value: dayLabel(_needed.toIso8601String().substring(0, 10)),
             icon: Icons.calendar_today_outlined,
             onTap: () async {

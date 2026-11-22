@@ -159,20 +159,21 @@ class _BankScreenState extends State<BankScreen> {
   bool _importing = false;
 
   Future<void> _import() async {
-    final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['csv', 'xls', 'xlsx'], withData: true);
-    final file = picked?.files.single;
-    if (file == null || file.bytes == null || !mounted) return;
+    final file = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['csv', 'xls', 'xlsx']);
+    if (file == null || !mounted) return;
+    final bytes = await file.readAsBytes();
+    if (!mounted) return;
     final api = context.read<ApiClient>();
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _importing = true);
     try {
-      final preview = await api.postFile('/bank/statements/preview', file.bytes!, file.name) as Map<String, dynamic>;
+      final preview = await api.postFile('/bank/statements/preview', bytes, file.name) as Map<String, dynamic>;
       if (!mounted) return;
       final go = await showDialog<bool>(context: context, builder: (_) => _PreviewDialog(preview: preview));
       if (go != true) return;
       final result = await api.postFile(
         '/bank/statements',
-        file.bytes!,
+        bytes,
         file.name,
         fields: {'layout': jsonEncode(preview['layout'])},
       ) as Map<String, dynamic>;

@@ -325,9 +325,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 }
 
 /// Share an Excel file to whatever the phone offers: email, WhatsApp, Drive, Files.
-Future<void> shareSpreadsheet(Uint8List bytes, String name) => Share.shareXFiles([
-      XFile.fromData(bytes, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: name),
-    ], fileNameOverrides: [name]);
+Future<void> shareSpreadsheet(Uint8List bytes, String name) => SharePlus.instance.share(
+      ShareParams(
+        files: [XFile.fromData(bytes, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', name: name)],
+        fileNameOverrides: [name],
+      ),
+    );
 
 /// How the figures were worked out, under every view.
 class _Basis extends StatelessWidget {
