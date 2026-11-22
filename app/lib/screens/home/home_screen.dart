@@ -10,6 +10,8 @@ import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
 import '../account/account_screen.dart';
 import '../admin/admin_dashboard_screen.dart';
+import '../analytics/analytics_screen.dart';
+import '../analytics/custom_report_screen.dart' show SavedReportsScreen;
 import '../delivery/delivery_screens.dart';
 import '../lr/lr_form_screen.dart';
 import '../lr/lr_list_screen.dart' show LrDetailScreen;
@@ -47,6 +49,8 @@ class _HomeScreenState extends State<HomeScreen> {
         if (user.canBookLr) Command(Icons.document_scanner_outlined, 'Scan an invoice', () => _open(const LrFormScreen(startWithScan: true))),
         if (user.seesOperations) Command(Icons.insights_outlined, 'Operations', () => _open(const OperationsScreen()), keywords: 'dashboard branches'),
         if (user.worksWithMoney) Command(Icons.payments_outlined, 'Collections', () => _open(const MoneyScreen()), keywords: 'money receipt cash bank'),
+        if (user.can('analytics.view')) Command(Icons.query_stats, 'Analytics', () => _open(const AnalyticsScreen()), keywords: 'reports statistics revenue customers rates'),
+        if (user.can('analytics.view')) Command(Icons.bookmark_border, 'Saved reports', () => _open(const SavedReportsScreen()), keywords: 'scheduled email excel'),
         if (user.worksWithDelivery) Command(Icons.assignment_turned_in_outlined, 'Gate passes', () => _open(const GatePassesScreen()), keywords: 'delivery pod'),
         if (user.canCollect || user.canManageTasks) Command(Icons.checklist, 'Collection tasks', () => _open(const TasksScreen()), keywords: 'chase follow up'),
         if (user.canRequestApproval || user.canDecideApproval) Command(Icons.how_to_vote_outlined, 'Approvals', () => _open(const ApprovalsScreen())),
@@ -202,6 +206,19 @@ class _HomeScreenState extends State<HomeScreen> {
                           leading: Icon(Icons.dashboard_outlined, color: Palette.onSurface),
                           title: Text('Operations'),
                           subtitle: Text('Branches, deliveries, money owed, staff'),
+                          trailing: Icon(Icons.chevron_right, color: Palette.onSurfaceMuted),
+                        ),
+                      ),
+                    ],
+                    if (user?.can('analytics.view') ?? false) ...[
+                      const SizedBox(height: 12),
+                      AppCard(
+                        onTap: () => _open(const AnalyticsScreen()),
+                        child: const ListTile(
+                          contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+                          leading: Icon(Icons.query_stats, color: Palette.onSurface),
+                          title: Text('Analytics'),
+                          subtitle: Text('Customers, routes, rates, delivery, money, reports'),
                           trailing: Icon(Icons.chevron_right, color: Palette.onSurfaceMuted),
                         ),
                       ),

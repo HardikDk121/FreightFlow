@@ -1,7 +1,7 @@
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -10,7 +10,7 @@ from app.auth.schemas import AcceptInviteRequest, RegisterRequest, TokenPair
 from app.config import get_settings
 from app.db import SessionLocal, set_tenant
 from app.errors import AppError, conflict, unauthorized
-from app.models import AuthToken, Branch, Company, Role, User, UserInvite
+from app.models import AuthThrottle, AuthToken, Branch, Company, Role, User, UserInvite
 from app.security import (
     company_id_from_token,
     encode_access_token,
@@ -89,7 +89,37 @@ def register(session: Session, data: RegisterRequest) -> TokenPair:
     return issue_tokens(session, user)
 
 
-def login(session: Session, login_id: str, password: str) -> TokenPair:
+# Wrong passwords allowed before sign-in is paused, per account and per network address.
+MAX_FAILURES_PER_LOGIN = 5
+MAX_FAILURES_PER_IP = 30
+FAILURE_WINDOW = timedelta(minutes=15)
+
+
+def _failure_keys(login_id: str, ip: str) -> dict[str, int]:
+    from app.auth.recovery import throttle_key
+
+    return {throttle_key("login-fail", login_id): MAX_FAILURES_PER_LOGIN, throttle_key("login-fail-ip", ip): MAX_FAILURES_PER_IP}
+
+
+def _check_failures(session: Session, keys: dict[str, int]) -> None:
+    since = utcnow() - FAILURE_WINDOW
+    for key_hash, limit in keys.items():
+        failures = session.scalar(
+            select(func.count()).select_from(AuthThrottle).where(AuthThrottle.key_hash == key_hash, AuthThrottle.created_at > since)
+        )
+        if failures >= limit:
+            raise AppError(429, "too_many_attempts", "Too many wrong attempts. Wait 15 minutes, or reset your password.")
+
+
+def _record_failure(keys: dict[str, int]) -> None:
+    # Its own transaction: the request's one rolls back with the 401.
+    with SessionLocal.begin() as side:
+        side.add_all(AuthThrottle(key_hash=key_hash) for key_hash in keys)
+
+
+def login(session: Session, login_id: str, password: str, ip: str) -> TokenPair:
+    keys = _failure_keys(login_id, ip)
+    _check_failures(session, keys)
     # The caller's company is unknown here, so this one lookup goes through a
     # SECURITY DEFINER function that returns ids only.
     row = session.execute(
@@ -97,10 +127,12 @@ def login(session: Session, login_id: str, password: str) -> TokenPair:
     ).first()
     if row is None:
         verify_password(_DUMMY_HASH, password)
+        _record_failure(keys)
         raise unauthorized(_BAD_LOGIN)
     set_tenant(session, row.company_id)
     user = session.get(User, row.id)
     if user is None or not verify_password(user.password_hash, password) or not user.is_active:
+        _record_failure(keys)
         raise unauthorized(_BAD_LOGIN)
     return issue_tokens(session, user)
 

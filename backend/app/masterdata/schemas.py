@@ -132,6 +132,8 @@ class TruckCreate(BaseModel):
     model_year: ModelYear
     insurance_expiry: dt.date
     fitness_expiry: dt.date
+    # The truck's owner, when known. The company hires every truck.
+    vendor_id: uuid.UUID | None = None
 
 
 class TruckUpdate(PatchModel):
@@ -149,6 +151,7 @@ class TruckUpdate(PatchModel):
     insurance_expiry: dt.date | None = None
     fitness_expiry: dt.date | None = None
     current_station: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=30)] | None = None
+    vendor_id: uuid.UUID | None = None
     is_active: bool | None = None
 
 
@@ -164,3 +167,4 @@ class TruckRead(_Read):
     insurance_expiry: dt.date | None
     fitness_expiry: dt.date | None
     current_station: str | None
+    vendor_id: uuid.UUID | None

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
@@ -6,20 +8,23 @@ import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../theme/app_theme.dart';
 
-/// Shows a PDF from the server with print, share and save. A4 unless [pageFormat] says otherwise.
+/// Shows a PDF with print, share and save: fetched from [path], or [bytes] already fetched (for
+/// PDFs that come from a POST). A4 unless [pageFormat] says otherwise.
 class PdfScreen extends StatelessWidget {
   const PdfScreen({
     super.key,
     required this.title,
-    required this.path,
+    this.path,
+    this.bytes,
     required this.fileName,
     this.pageFormat = PdfPageFormat.a4,
-  });
+  }) : assert((path == null) != (bytes == null), 'Give a path or the bytes, not both.');
 
   final String title;
 
   /// API path that returns the PDF, including any query string.
-  final String path;
+  final String? path;
+  final Uint8List? bytes;
   final String fileName;
   final PdfPageFormat pageFormat;
 
@@ -27,7 +32,7 @@ class PdfScreen extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: Text(title)),
         body: PdfPreview(
-          build: (_) => context.read<ApiClient>().getBytes(path),
+          build: (_) async => bytes ?? await context.read<ApiClient>().getBytes(path!),
           initialPageFormat: pageFormat,
           canChangePageFormat: false,
           canChangeOrientation: false,

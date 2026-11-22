@@ -7,6 +7,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
 import 'cash_screens.dart';
+import '../hire/hire_screens.dart' show PayablesScreen;
 import 'owner_screens.dart';
 import 'receipt_screens.dart';
 
@@ -77,6 +78,8 @@ class _MoneyScreenState extends State<MoneyScreen> {
                 _action(Icons.insights_outlined, 'Money trail', 'Booked, collected, handed over, banked', const MoneyTrailScreen()),
               if (user.canReconcileBank)
                 _action(Icons.upload_file, 'Bank statement', 'Import from ICICI and match', const BankScreen()),
+              if (user.can('vendors.pay'))
+                _action(Icons.local_shipping_outlined, 'Owed to truck owners', 'Hire still to pay, trip by trip', const PayablesScreen()),
               if (user.canSeeMoneyTrail)
                 _action(Icons.hourglass_bottom, 'Where money is stuck', 'Ageing, overdue, limits, late payers', const StuckMoneyScreen()),
               if (user.canManageCredit) ...[

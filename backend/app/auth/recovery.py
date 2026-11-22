@@ -28,11 +28,11 @@ MAX_CODE_ATTEMPTS = 5
 _INVALID_CODE = AppError(400, "invalid_code", "That code is wrong or has expired. Ask for a new one.")
 
 
-def _key(kind: str, value: str) -> str:
+def throttle_key(kind: str, value: str) -> str:
     return hashlib.sha256(f"{kind}:{value.strip().lower()}".encode()).hexdigest()
 
 
-def _throttle(session: Session, limits: dict[str, int]) -> None:
+def throttle(session: Session, limits: dict[str, int]) -> None:
     """Count this request against each key, and refuse it if any key is over its hourly limit.
     Keys are hashes, and the limit applies whether or not an account exists."""
     since = utcnow() - dt.timedelta(hours=1)
@@ -66,7 +66,7 @@ def _code_hash(user_id, code: str) -> str:
 def request_password_reset(
     session: Session, login: str, ip: str, outbox: Outbox, background: BackgroundTasks
 ) -> None:
-    _throttle(session, {_key("reset", login): MAX_PER_ACCOUNT_PER_HOUR, _key("reset-ip", ip): MAX_PER_IP_PER_HOUR})
+    throttle(session, {throttle_key("reset", login): MAX_PER_ACCOUNT_PER_HOUR, throttle_key("reset-ip", ip): MAX_PER_IP_PER_HOUR})
     user = _find_user(session, login)
     if user is None:
         return
@@ -132,7 +132,7 @@ def reset_password(session: Session, login: str, code: str, new_password: str) -
 
 def recover_login_email(session: Session, phone: str, ip: str, outbox: Outbox, background: BackgroundTasks) -> None:
     """Text the login email to the phone on the account. The caller learns nothing; only the phone's owner does."""
-    _throttle(session, {_key("recover", phone): MAX_PER_ACCOUNT_PER_HOUR, _key("recover-ip", ip): MAX_PER_IP_PER_HOUR})
+    throttle(session, {throttle_key("recover", phone): MAX_PER_ACCOUNT_PER_HOUR, throttle_key("recover-ip", ip): MAX_PER_IP_PER_HOUR})
     user = _find_user(session, phone)
     if user is None or user.phone != phone:
         return

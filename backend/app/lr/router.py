@@ -152,7 +152,7 @@ def list_lrs(
     date_from: dt.date | None = None,
     date_to: dt.date | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
     _: User = Depends(current_user),
     session: Session = Depends(get_session),
 ) -> list[LrRead]:

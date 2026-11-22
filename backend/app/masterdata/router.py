@@ -31,7 +31,7 @@ def _build(
         q: Annotated[str | None, Query(max_length=100)] = None,
         include_inactive: bool = False,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
-        offset: Annotated[int, Query(ge=0)] = 0,
+        offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
         _: User = Depends(current_user),
         session: Session = Depends(get_session),
     ) -> list[BaseModel]:

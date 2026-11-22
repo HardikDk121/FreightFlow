@@ -1,0 +1,16 @@
+# HTTPS for the API at your DuckDNS name (FF_DOMAIN in .env, e.g. sharma-freight.duckdns.org).
+# Caddy obtains and renews the certificate itself; ports 80 and 443 must be open in the EC2
+# security group. Used only with: docker compose --profile https up -d
+{$FF_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy api:8000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+	request_body {
+		max_size 25MB
+	}
+	log {
+		output stdout
+		format console
+	}
+}

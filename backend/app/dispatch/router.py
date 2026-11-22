@@ -71,7 +71,7 @@ def dispatch_trip(
 def list_trips(
     status: Literal["dispatched", "completed"] | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
     _: User = Depends(current_user),
     session: Session = Depends(get_session),
 ) -> list[TripRead]:

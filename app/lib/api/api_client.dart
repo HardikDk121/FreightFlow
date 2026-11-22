@@ -79,7 +79,8 @@ class ApiClient {
   Future<dynamic> patch(String path, Map<String, dynamic> body) async =>
       _json(await _send('PATCH', path, body: body));
 
-  Future<dynamic> put(String path, Map<String, dynamic> body) async => _json(await _send('PUT', path, body: body));
+  /// [body] is a JSON object, or a list for endpoints that replace a whole list.
+  Future<dynamic> put(String path, Object body) async => _json(await _send('PUT', path, body: body));
 
   /// GET that returns a file, such as a PDF.
   Future<Uint8List> getBytes(String path) async => (await _send('GET', path)).bodyBytes;
@@ -119,7 +120,7 @@ class ApiClient {
   Future<http.Response> _send(
     String method,
     String path, {
-    Map<String, dynamic>? body,
+    Object? body,
     Map<String, String>? query,
     (Uint8List, String)? file,
     Map<String, String> fields = const {},

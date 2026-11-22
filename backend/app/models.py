@@ -183,6 +183,8 @@ class Truck(Base):
     fitness_expiry: Mapped[date | None] = mapped_column(Date)
     # Where the truck stands when it is not on a trip: the last stop of its last trip.
     current_station: Mapped[str | None] = mapped_column(Text)
+    # The truck's owner, from whom it is hired.
+    vendor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("vendor.id"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
@@ -224,6 +226,7 @@ class LrSettings(Base):
     # "MR" prints MR-90012; empty prints 90012, to continue a paper series.
     receipt_prefix: Mapped[str] = mapped_column(Text, nullable=False, default="MR")
     gate_pass_prefix: Mapped[str] = mapped_column(Text, nullable=False, default="GP")
+    next_rfq_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_at: Mapped[datetime] = _updated_at()
 
 
@@ -808,3 +811,172 @@ class ApprovalRequest(Base):
     decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("app_user.id"))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     decision_note: Mapped[str | None] = mapped_column(Text)
+
+
+class SavedReport(Base):
+    __tablename__ = "saved_report"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    analysis: Mapped[str] = mapped_column(Text, nullable=False)
+    filters: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    custom: Mapped[dict | None] = mapped_column(JSONB)
+    schedule: Mapped[str] = mapped_column(Text, nullable=False, default="none")
+    recipients: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    last_sent_on: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class Vendor(Base):
+    """A truck owner or broker the company hires trucks from."""
+
+    __tablename__ = "vendor"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    phone: Mapped[str | None] = mapped_column(Text)
+    pan: Mapped[str | None] = mapped_column(Text)
+    bank_details: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class TripHire(Base):
+    __tablename__ = "trip_hire"
+
+    trip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trip.id"), primary_key=True)
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    vendor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vendor.id"), nullable=False)
+    hire_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    rfq_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("rfq.id"))
+    note: Mapped[str | None] = mapped_column(Text)
+    agreed_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    agreed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class VendorPayment(Base):
+    __tablename__ = "vendor_payment"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    trip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trip.id"), nullable=False)
+    vendor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vendor.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    reference: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
+    paid_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TripDeduction(Base):
+    __tablename__ = "trip_deduction"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    trip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trip.id"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    recorded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TripExpense(Base):
+    __tablename__ = "trip_expense"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    trip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trip.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    recorded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Contract(Base):
+    __tablename__ = "contract"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    party_name: Mapped[str] = mapped_column(Text, nullable=False)
+    starts_on: Mapped[date] = mapped_column(Date, nullable=False)
+    ends_on: Mapped[date] = mapped_column(Date, nullable=False)
+    terms: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class ContractRate(Base):
+    __tablename__ = "contract_rate"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    contract_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contract.id"), nullable=False)
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    basis: Mapped[str] = mapped_column(Text, nullable=False)
+    rate: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+
+
+class TransitTime(Base):
+    __tablename__ = "transit_time"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    days_min: Mapped[int] = mapped_column(Integer, nullable=False)
+    days_max: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class Rfq(Base):
+    __tablename__ = "rfq"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    branch_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("branch.id"), nullable=False)
+    rfq_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    origin: Mapped[str] = mapped_column(Text, nullable=False)
+    destination: Mapped[str] = mapped_column(Text, nullable=False)
+    weight_kg: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    truck_type: Mapped[str | None] = mapped_column(Text)
+    needed_on: Mapped[date] = mapped_column(Date, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
+    awarded_quote_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("rfq_quote.id"))
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    created_at: Mapped[datetime] = _created_at()
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RfqInvite(Base):
+    __tablename__ = "rfq_invite"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    rfq_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("rfq.id"), nullable=False)
+    vendor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vendor.id"), nullable=False)
+    invited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RfqQuote(Base):
+    __tablename__ = "rfq_quote"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    company_id: Mapped[uuid.UUID] = _company_fk()
+    rfq_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("rfq.id"), nullable=False)
+    vendor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("vendor.id"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    vehicle_number: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
+    recorded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

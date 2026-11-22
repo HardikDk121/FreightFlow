@@ -19,16 +19,20 @@ from app.models import User
 from app.notify import Outbox, get_outbox
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+MAX_REGISTRATIONS_PER_IP_PER_HOUR = 5
 
 
 @router.post("/register", response_model=TokenPair, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest, session: Session = Depends(get_session)) -> TokenPair:
+def register(body: RegisterRequest, request: Request, session: Session = Depends(get_session)) -> TokenPair:
+    # One network address may register only a few companies an hour.
+    recovery.throttle(session, {recovery.throttle_key("register-ip", _ip(request)): MAX_REGISTRATIONS_PER_IP_PER_HOUR})
     return service.register(session, body)
 
 
 @router.post("/login", response_model=TokenPair)
-def login(body: LoginRequest, session: Session = Depends(get_session)) -> TokenPair:
-    return service.login(session, body.login, body.password)
+def login(body: LoginRequest, request: Request, session: Session = Depends(get_session)) -> TokenPair:
+    """After 5 wrong passwords for one account (or 30 from one address) in 15 minutes, sign-in pauses."""
+    return service.login(session, body.login, body.password, _ip(request))
 
 
 @router.post("/refresh", response_model=TokenPair)
@@ -52,7 +56,8 @@ def accept_invite(body: AcceptInviteRequest, session: Session = Depends(get_sess
 
 
 def _ip(request: Request) -> str:
-    # Behind a reverse proxy, configure it to pass the real client address (uvicorn --proxy-headers).
+    # Behind the reverse proxy, uvicorn's --proxy-headers sets this to the caller's real address
+    # (trusted only from the addresses in FF_FORWARDED_ALLOW_IPS; see the Dockerfile).
     return request.client.host if request.client else "unknown"
 
 

@@ -72,7 +72,7 @@ async def import_statement(
 def list_lines(
     line_status: Annotated[Literal["unmatched", "matched", "ignored"] | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
     _: User = Depends(_owner),
     session: Session = Depends(get_session),
 ) -> list[LineRead]:

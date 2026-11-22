@@ -4,7 +4,7 @@ import uuid
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy import any_, select
+from sqlalchemy import any_, func, select
 from sqlalchemy.orm import Session
 
 from app import audit
@@ -72,7 +72,14 @@ def _check_cities(session: Session, cities: list[str], keep: uuid.UUID | None) -
             raise conflict(f"{', '.join(sorted(clash))} is already delivered by {branch.name}.")
 
 
+def _check_name(session: Session, name: str, keep: uuid.UUID | None) -> None:
+    other = session.scalar(select(Branch.id).where(func.lower(Branch.name) == name.lower()))
+    if other is not None and other != keep:
+        raise conflict(f"There is already a branch called {name}.")
+
+
 def create(session: Session, actor: User, data: BranchUpsert) -> Branch:
+    _check_name(session, data.name, None)
     if len(set(data.cities)) != len(data.cities):
         raise conflict("A city is listed twice.")
     _check_cities(session, data.cities, None)
@@ -89,6 +96,7 @@ def update(session: Session, actor: User, branch_id: uuid.UUID, data: BranchUpse
         raise not_found("Branch")
     if branch.is_head_office and not data.is_active:
         raise conflict("The head office cannot be closed.")
+    _check_name(session, data.name, branch.id)
     _check_cities(session, data.cities, branch.id)
     for key, value in data.model_dump().items():
         setattr(branch, key, value)

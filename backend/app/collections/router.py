@@ -62,7 +62,7 @@ def issue_receipt(
 def list_receipts(
     receipt_status: Annotated[Literal["open", "settled", "cancelled"] | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=1_000_000)] = 0,
     _: User = Depends(current_user),
     session: Session = Depends(get_session),
 ) -> list[ReceiptRead]:

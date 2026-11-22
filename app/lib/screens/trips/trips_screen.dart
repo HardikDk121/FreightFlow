@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
 import '../../widgets/pdf_screen.dart';
+import '../hire/hire_screens.dart' show TripMoneyScreen;
 import '../shell.dart';
 import 'additions_screens.dart';
 
@@ -351,11 +352,20 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   Widget build(BuildContext context) {
     final canDispatch = context.select<Session, bool>((s) => s.user?.canDispatch ?? false);
     final canUndo = context.select<Session, bool>((s) => s.user?.canUndoDelivery ?? false);
+    final seesHire = context.select<Session, bool>((s) => s.user?.can('vendors.manage') ?? false);
     final text = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Trip'),
         actions: [
+          if (seesHire)
+            IconButton(
+              tooltip: 'Hire and profit',
+              icon: const Icon(Icons.currency_rupee),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => TripMoneyScreen(tripId: widget.tripId, title: 'Hire and profit')),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: FilledButton.icon(

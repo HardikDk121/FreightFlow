@@ -95,6 +95,44 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   String? _rateRuleId;
   String? _quoteProblem;
   Timer? _quoteDebounce;
+
+  /// The customer's contract rate for this destination, when they have one; shown above the rate.
+  Map<String, dynamic>? _contract;
+  Timer? _contractDebounce;
+  int _contractRequest = 0;
+
+  /// After the payer or destination changes, look for a contract rate and use it unless the
+  /// rate was typed by hand. The server checks nothing here: an LR may still be charged differently,
+  /// and Analytics lists those.
+  void _scheduleContract() {
+    _contractDebounce?.cancel();
+    _contractDebounce = Timer(const Duration(milliseconds: 500), _checkContract);
+  }
+
+  Future<void> _checkContract() async {
+    final payer = (_freightBy == 'ToPay' ? _consignee : _consignor).text.trim();
+    final city = _to.text.trim();
+    if (payer.isEmpty || city.isEmpty) {
+      if (_contract != null) setState(() => _contract = null);
+      return;
+    }
+    final request = ++_contractRequest;
+    try {
+      final found = await context.read<ApiClient>().get('/contracts/rate', query: {'party': payer, 'destination': city}) as Map<String, dynamic>?;
+      if (!mounted || request != _contractRequest) return;
+      setState(() {
+        _contract = found;
+        if (found != null && _goodsClass.isEmpty && !_typed.contains('rate')) {
+          _basis = found['basis'] as String;
+          _rate.text = found['rate'] as String;
+          _filledByApp.add('rate');
+          _recalculate();
+        }
+      });
+    } on ApiException {
+      // Without the lookup the clerk enters the rate as usual.
+    }
+  }
   int _quoteRequest = 0;
 
   /// The server's answer on whether an e-way bill is needed, refreshed as the inputs change.
@@ -130,6 +168,9 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   void initState() {
     super.initState();
     _loadDefaults();
+    for (final c in [_consignor, _consignee, _to]) {
+      c.addListener(_scheduleContract);
+    }
   }
 
   @override
@@ -143,6 +184,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     }
     _evaluateDebounce?.cancel();
     _quoteDebounce?.cancel();
+    _contractDebounce?.cancel();
     super.dispose();
   }
 
@@ -899,11 +941,14 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
           options: _freightByOptions,
           value: _freightBy,
           highlighted: _filledByApp.contains('freight_by'),
-          onChanged: (v) => setState(() {
-            _freightBy = v;
-            _freightByChosen = true;
-            _filledByApp.remove('freight_by');
-          }),
+          onChanged: (v) {
+            setState(() {
+              _freightBy = v;
+              _freightByChosen = true;
+              _filledByApp.remove('freight_by');
+            });
+            _scheduleContract();
+          },
         ),
         const SectionHeader('Parties', icon: Icons.groups_outlined),
         Focus(
@@ -1017,6 +1062,19 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
           ),
         if (_quoteProblem != null)
           Padding(padding: const EdgeInsets.only(bottom: 16), child: ErrorBanner(_quoteProblem!)),
+        if (_contract != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: AppCard(
+              color: Palette.primaryContainer,
+              padding: const EdgeInsets.all(14),
+              child: Text(
+                'Contract rate for ${_contract!['party_name']}: ₹${_contract!['rate']} per ${_contract!['basis'] == 'per_kg' ? 'kg' : 'article'}, '
+                'until ${dayLabel(_contract!['ends_on'] as String)}.',
+                style: text.bodyMedium!.copyWith(color: Palette.onPrimaryContainer),
+              ),
+            ),
+          ),
         if (_goodsClass.isEmpty)
           ChoiceField<String>(
             label: 'Charge by',

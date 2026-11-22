@@ -11,9 +11,15 @@ some errors on the first `flutter analyze`.
 cd app
 flutter create --project-name freightflow --platforms android,ios .
 flutter pub get
+dart run flutter_launcher_icons
 flutter analyze
 flutter run
 ```
+
+`dart run flutter_launcher_icons` writes the app icon into the new `android/` and `ios/` folders from
+`assets/icon/` (the yellow F with the truck, on black). Run it again after any `flutter create`.
+To change the icon, replace `assets/icon/source_logo.jpeg`, run `python3 assets/icon/make_icons.py`
+(needs Pillow and NumPy), check `assets/icon/preview.png`, then run the generator again.
 
 `flutter create` adds the `android/` and `ios/` folders and keeps the existing `lib/` and `pubspec.yaml`.
 With no `API_BASE_URL`, the app looks for the backend on the development machine: `10.0.2.2:8000` from the
@@ -24,8 +30,12 @@ or the deployed URL: `flutter run --dart-define=API_BASE_URL=http://192.168.1.20
 
 In `android/app/src/main/AndroidManifest.xml`:
 
+- The name under the icon: set `android:label="FreightFlow"` on `<application>`.
 - Add `<uses-permission android:name="android.permission.INTERNET"/>` above `<application>`. Debug
   builds have it already; release builds do not.
+- For proof of delivery, also add `android.permission.CAMERA`, `android.permission.ACCESS_FINE_LOCATION`
+  and `android.permission.ACCESS_COARSE_LOCATION`. Without location, deliveries are still recorded.
+- For predictive back on Android 14: `android:enableOnBackInvokedCallback="true"` on `<application>`.
 - While the backend is plain `http`, add `android:usesCleartextTraffic="true"` to `<application>`.
   Remove it once the backend is on HTTPS.
 
@@ -35,6 +45,9 @@ In `android/app/src/main/AndroidManifest.xml`:
 
 One codebase builds both platforms; nothing in `lib/` is Android-specific.
 
+- The name under the icon: set `CFBundleDisplayName` to `FreightFlow` in `ios/Runner/Info.plist`. For
+  proof of delivery, add `NSCameraUsageDescription` and `NSLocationWhenInUseUsageDescription` with a
+  sentence each ("To photograph the signed gate pass", "To record where goods were delivered").
 - Building for iOS needs a Mac with Xcode. Run `cd ios && pod install` once, then `flutter run` with a
   simulator open.
 - While the backend is plain `http`, add this to `ios/Runner/Info.plist`, and remove it once the backend

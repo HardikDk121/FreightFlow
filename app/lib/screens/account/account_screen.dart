@@ -8,6 +8,8 @@ import '../../widgets/common.dart';
 import '../admin/admin_dashboard_screen.dart' show rateMatrixScreen;
 import '../masterdata/master_data_screen.dart';
 import '../money/money_screen.dart';
+import '../hire/contracts_screen.dart';
+import '../hire/hire_screens.dart' show RfqsScreen, VendorsScreen;
 import '../ops/ops_screens.dart';
 import '../payments/payments_screens.dart';
 import '../team/users_screen.dart';
@@ -35,6 +37,10 @@ class AccountScreen extends StatelessWidget {
       if (user.worksWithMoney) (Icons.payments_outlined, 'Collections', const MoneyScreen()),
       if (user.canSeeMoney) (Icons.account_balance_wallet_outlined, 'Receivables', const ReceivablesScreen()),
       if (user.canRequestApproval || user.canDecideApproval) (Icons.how_to_vote_outlined, 'Approvals', const ApprovalsScreen()),
+      if (user.can('vendors.manage')) (Icons.local_shipping_outlined, 'Truck owners', const VendorsScreen()),
+      if (user.can('vendors.manage')) (Icons.request_quote_outlined, 'Truck quotes', const RfqsScreen()),
+      if (user.can('contracts.manage') || user.can('analytics.view')) (Icons.description_outlined, 'Customer contracts', const ContractsScreen()),
+      if (user.canEditMasterData) (Icons.schedule, 'Usual transit times', const TransitTimesScreen()),
       if (user.canManageUsers) (Icons.group_outlined, 'Team and permissions', const UsersScreen()),
       if (user.canManageBranches) (Icons.account_tree_outlined, 'Branches', const BranchesScreen()),
       if (user.can('company.settings')) (Icons.apartment_outlined, 'Company / LR header', const CompanyScreen()),

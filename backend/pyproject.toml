@@ -11,7 +11,7 @@ dependencies = [
     "pydantic[email]>=2.7",
     "pydantic-settings>=2.3",
     "argon2-cffi>=23.1",
-    "pyjwt>=2.8",
+    "pyjwt>=2.15",
     "reportlab>=4.0",
     "python-multipart>=0.0.9",
     "opencv-python-headless>=4.9",
@@ -33,7 +33,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["app", "app.auth", "app.users", "app.company", "app.masterdata", "app.lr", "app.dispatch", "app.planner", "app.scan", "app.chat", "app.dashboard", "app.reports", "app.eway", "app.rates", "app.payments", "app.collections", "app.bank", "app.delivery"]
+packages = ["app", "app.auth", "app.users", "app.company", "app.masterdata", "app.lr", "app.dispatch", "app.planner", "app.scan", "app.chat", "app.dashboard", "app.reports", "app.eway", "app.rates", "app.payments", "app.collections", "app.bank", "app.delivery", "app.analytics", "app.hire"]
 
 [tool.setuptools.package-data]
 "app.lr" = ["*.json"]

@@ -31,6 +31,10 @@ The rest of this file covers the backend.
 | Tasks | `GET /tasks?scope=mine|all`, `POST /tasks/{id}/attempts`, `POST /tasks/{id}/assign` |
 | Reminders | `POST /reminders/run`, `GET /reminders?payer=` |
 | Operations | `GET /dashboard/operations` (whole business for the owner; one branch for a branch manager) |
+| Analytics | `GET /analytics/{overview,trend,customers,lanes,rates,execution,fleet,finance,branches,insights}` with `period` or `date_from`/`date_to`, `customer`, `customer_role`, `origin`, `destination`, `freight_by`, `stage`, `branch_id`; `GET /analytics/{name}/export?format=xlsx|pdf`; `POST /analytics/custom` and `/custom/export`; `GET /analytics/options`; saved and scheduled reports at `/analytics/saved` |
+| Truck hire | `GET/POST/PUT /vendors`; `GET /trips/{id}/money`, `PUT /trips/{id}/hire`, `POST /trips/{id}/owner-payments` (advance, balance, reversal), `/deductions`, `/expenses`; `GET /payables` |
+| Quotes | `POST /rfqs`, `GET /rfqs`, `GET /rfqs/{id}`, `POST /rfqs/{id}/quotes`, `/remind`, `/award`, `/cancel` |
+| Contracts | `GET/POST/PUT /contracts`, `GET /contracts/rate?party=&destination=`; `GET/PUT /transit-times` |
 | Invoice scan | `POST /invoices/scan` (photo upload): reads consignor, consignee, GST numbers, city, goods, value and e-way bill number. Nothing is saved and the photo is not kept. |
 | Pending | `GET /pending` (by destination), `GET /pending/lrs?destination=&older_than_days=` (oldest first) |
 | Trips | `GET /trips/suggestions` (which truck for which route), `POST /trips/plan` (load for a truck and its stops), `POST /trips` (dispatch to one or more stops, partial loads allowed), `POST /trips/{id}/stops/{city}/deliver` (unload a whole stop), `GET /trips`, `GET /trips/{id}`, `POST /trips/{id}/lines/{line_id}/deliver`, `POST /trips/{id}/lines/{line_id}/undo-delivery` (admin, manager), `GET /trips/{id}/load-sheet.pdf` |
@@ -48,7 +52,10 @@ cp .env.example .env      # then replace every value
 docker compose up --build
 ```
 
-The API listens on port 8000. Migrations run on start.
+The API listens on port 8000. Migrations run on start, so on a server with data, back up first:
+see `docs/DEPLOY.md`. Optional HTTPS for a DuckDNS name: `docker compose --profile https up -d`.
+
+The Flutter app (`app/`): `flutter pub get`, then `flutter run --dart-define=API_BASE_URL=https://your-name.duckdns.org`.
 
 ## Run the tests
 
@@ -59,8 +66,8 @@ psql -U postgres -c "CREATE ROLE freightflow_owner LOGIN PASSWORD 'owner' CREATE
 psql -U postgres -c "CREATE ROLE freightflow_app LOGIN PASSWORD 'app'"
 psql -U postgres -c "CREATE DATABASE freightflow_test OWNER freightflow_owner"
 cd backend
-pip install -e ".[dev]"
-pytest
+pip install -c constraints.txt -e ".[dev]"
+pytest -q          # about 5 minutes; refuses any database not named *_test
 ```
 
 The tests also need **Tesseract** installed (`apt install tesseract-ocr`, or the Windows installer
@@ -148,6 +155,17 @@ the running backend.
 - **The daily job** creates and closes collection tasks and sends reminders for every company:
   `docker compose run --rm api python -m app.jobs daily`, from cron each morning. Opening a task list or
   the operations dashboard also refreshes tasks, so they are right even before the job runs.
+- **Analytics read facts, not copies.** `app/analytics/facts.py` builds one row per LR from the LR, its
+  trips, its gate pass and its collections; every analysis is computed from those rows, and every answer
+  carries a `basis` saying how. Row-level security applies, so a branch manager's analytics, exports and
+  scheduled reports hold their branch only. Scheduled reports are emailed as Excel by the daily job.
+- **Every truck is hired.** The company owns none; the driver pays diesel, tolls and wages out of the hire.
+  A trip's profit is the freight it carries (each LR's total shared by packages on the trip) minus the hire,
+  plus deductions taken from the owner, minus office expenses. Owner payments are insert-only; the balance
+  is paid after delivery (earlier only with `approvals.decide`); mistakes are reversed with a reason.
+- **Contracts and transit times.** A customer's contract gives an agreed rate per destination for a period;
+  the LR form starts from it and Analytics lists LRs charged differently. Usual transit times ("Raipur 4 to
+  5 days") are what the office tells customers, not a promise; trips longer than the upper figure are late.
 - **Adding a tenant table.** Add it to `TENANT_TABLES` in a new migration so it gets the policy and grants.
 
 ## Adjusting the printed LR
@@ -170,6 +188,18 @@ Restart the backend after editing.
 - Voice input for chat. A language model is optional and off until `FF_LLM_API_KEY` is set.
 - Ordered delivery stops and route planning (the journal's model plugs in here).
 - Generating e-way bills on the government portal (needs API access through a GSP).
-- Payment receipts as PDF, trip expenses and profit per trip, a map of truck positions (no GPS feed).
+- A map of truck positions (no GPS feed).
 - Scanning PAN cards and multi-page documents; automatic cropping of the photo.
-- An SMS provider, godown locations.
+- An SMS and WhatsApp provider (messages are recorded but not sent until one is connected), godown locations.
+
+## Security and testing
+
+- Run the tests: `cd backend && pip install -c constraints.txt -e ".[dev]" && pytest -q` against a PostgreSQL
+  16 database whose name ends in `_test` (the suite refuses any other). Set `FF_DATABASE_URL` and
+  `FF_MIGRATION_DATABASE_URL` as in `tests/conftest.py`.
+- `tests/test_adversarial.py` calls every endpoint without signing in and with hostile input;
+  `tests/test_security.py` and `tests/test_concurrency.py` cover sign-in limits, tokens, cross-company
+  access and simultaneous requests. Findings and fixes: `docs/AUDIT.md`.
+- Dependency versions are pinned in `backend/constraints.txt`; scan with
+  `pip-audit -r <(grep -v '^#' backend/constraints.txt) --no-deps --disable-pip`.
+- Deploying to the EC2 server behind the DuckDNS name: `docs/DEPLOY.md` (backup first: migrations run on start).

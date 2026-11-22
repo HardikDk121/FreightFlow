@@ -37,6 +37,12 @@ class P(StrEnum):
     APPROVALS_REQUEST = "approvals.request"
     APPROVALS_DECIDE = "approvals.decide"
     DASHBOARD_OWNER = "dashboard.owner"
+    ANALYTICS = "analytics.view"
+    # Truck owners: add them, agree hire, record trip expenses, ask for quotes.
+    VENDORS_MANAGE = "vendors.manage"
+    # Pay truck owners. Paying the balance before the trip is delivered needs approvals.decide.
+    VENDORS_PAY = "vendors.pay"
+    CONTRACTS = "contracts.manage"
     USERS_MANAGE = "users.manage"
     COMPANY_SETTINGS = "company.settings"
     BRANCHES_MANAGE = "branches.manage"
@@ -49,19 +55,19 @@ ROLE_DEFAULTS: dict[Role, frozenset[P]] = {
         {
             P.LR_BOOK, P.LR_CANCEL, P.MASTERDATA_EDIT, P.DISPATCH, P.TRIP_UNDO_DELIVERY, P.GATE_PASS,
             P.DELIVERY_CONFIRM, P.RECEIPT_ISSUE, P.RECEIPT_CANCEL, P.COLLECT, P.MONEY_RECEIVABLES,
-            P.MONEY_OVERVIEW, P.TASKS_MANAGE, P.APPROVALS_REQUEST,
+            P.MONEY_OVERVIEW, P.TASKS_MANAGE, P.APPROVALS_REQUEST, P.ANALYTICS, P.VENDORS_MANAGE,
         }
     ),
     Role.ACCOUNTANT: frozenset(
         {
             P.RECEIPT_ISSUE, P.RECEIPT_CANCEL, P.CASH_RECEIVE, P.MONEY_RECEIVABLES, P.MONEY_OVERVIEW,
-            P.BANK_RECONCILE, P.TASKS_MANAGE, P.APPROVALS_REQUEST,
+            P.BANK_RECONCILE, P.TASKS_MANAGE, P.APPROVALS_REQUEST, P.ANALYTICS, P.VENDORS_PAY,
         }
     ),
     Role.REGISTER_CLERK: frozenset(
         {P.RECEIPT_ISSUE, P.CASH_RECEIVE, P.MONEY_RECEIVABLES, P.GATE_PASS, P.DELIVERY_CONFIRM, P.APPROVALS_REQUEST}
     ),
-    Role.DISPATCHER: frozenset({P.DISPATCH, P.GATE_PASS, P.DELIVERY_CONFIRM}),
+    Role.DISPATCHER: frozenset({P.DISPATCH, P.GATE_PASS, P.DELIVERY_CONFIRM, P.VENDORS_MANAGE}),
     Role.CLERK: frozenset({P.LR_BOOK}),
     Role.COLLECTOR: frozenset({P.COLLECT, P.DELIVERY_CONFIRM}),
 }
@@ -70,7 +76,7 @@ ROLE_DEFAULTS: dict[Role, frozenset[P]] = {
 SENSITIVE = frozenset(
     {
         P.CREDIT_MANAGE, P.CREDIT_OVERRIDE, P.DELIVERY_CORRECT, P.APPROVALS_DECIDE, P.USERS_MANAGE,
-        P.BRANCHES_MANAGE, P.ALL_BRANCHES, P.BANK_RECONCILE, P.CASH_ANY_AMOUNT, P.DASHBOARD_OWNER,
+        P.BRANCHES_MANAGE, P.ALL_BRANCHES, P.BANK_RECONCILE, P.CASH_ANY_AMOUNT, P.DASHBOARD_OWNER, P.CONTRACTS,
     }
 )
 
