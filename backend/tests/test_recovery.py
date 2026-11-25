@@ -30,9 +30,9 @@ def test_unknown_accounts_get_the_same_answer_and_no_email(client, outbox, admin
     assert (known.status_code, known.json()) == (unknown.status_code, unknown.json())
     assert [to for to, _, _ in outbox.emails] == [LOGIN]
     wrong_account = client.post(
-        "/auth/password/reset", json={"login": "ghost@nowhere.example", "code": "123456", "new_password": "whatever-1"}
+        "/auth/password/reset", json={"login": "ghost@nowhere.example", "code": "123456", "new_password": "a much longer passphrase"}
     )
-    wrong_code = client.post("/auth/password/reset", json={"login": LOGIN, "code": "000000", "new_password": "whatever-1"})
+    wrong_code = client.post("/auth/password/reset", json={"login": LOGIN, "code": "000000", "new_password": "a much longer passphrase"})
     assert wrong_account.status_code == wrong_code.status_code == 400
     assert wrong_account.json() == wrong_code.json()
 
@@ -42,8 +42,8 @@ def test_five_wrong_codes_lock_the_code(client, outbox, admin):
     right = _code(outbox)
     wrong = "000000" if right != "000000" else "111111"
     for _ in range(5):
-        assert client.post("/auth/password/reset", json={"login": LOGIN, "code": wrong, "new_password": "whatever-1"}).status_code == 400
-    locked = client.post("/auth/password/reset", json={"login": LOGIN, "code": right, "new_password": "whatever-1"})
+        assert client.post("/auth/password/reset", json={"login": LOGIN, "code": wrong, "new_password": "a much longer passphrase"}).status_code == 400
+    locked = client.post("/auth/password/reset", json={"login": LOGIN, "code": right, "new_password": "a much longer passphrase"})
     assert locked.status_code == 400
     assert client.post("/auth/login", json={"login": LOGIN, "password": "correct-horse"}).status_code == 200
 
@@ -54,8 +54,8 @@ def test_only_the_newest_code_works(client, outbox, admin):
     _forgot(client)
     second = _code(outbox)
     if first != second:
-        assert client.post("/auth/password/reset", json={"login": LOGIN, "code": first, "new_password": "whatever-1"}).status_code == 400
-    assert client.post("/auth/password/reset", json={"login": LOGIN, "code": second, "new_password": "whatever-1"}).status_code == 204
+        assert client.post("/auth/password/reset", json={"login": LOGIN, "code": first, "new_password": "a much longer passphrase"}).status_code == 400
+    assert client.post("/auth/password/reset", json={"login": LOGIN, "code": second, "new_password": "a much longer passphrase"}).status_code == 204
 
 
 def test_requests_are_rate_limited_per_account_even_when_it_does_not_exist(client, outbox, admin):

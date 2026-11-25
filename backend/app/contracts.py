@@ -18,8 +18,8 @@ from app.deps import current_user
 from app.errors import conflict, not_found
 from app.models import Contract, ContractRate, TransitTime, User
 from app.permissions import P, require
+from app.validators import BusinessName, City
 
-City = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=2, max_length=30)]
 
 
 class RateIn(BaseModel):
@@ -29,7 +29,7 @@ class RateIn(BaseModel):
 
 
 class ContractIn(BaseModel):
-    party_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=80)]
+    party_name: Annotated[BusinessName, StringConstraints(max_length=80)]
     starts_on: dt.date
     ends_on: dt.date
     terms: Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)] | None = None

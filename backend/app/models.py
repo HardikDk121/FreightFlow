@@ -980,3 +980,17 @@ class RfqQuote(Base):
     note: Mapped[str | None] = mapped_column(Text)
     recorded_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("app_user.id"), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EmailCode(Base):
+    """A six-digit code emailed to prove a new sign-up owns the address. Ten minutes, five tries."""
+
+    __tablename__ = "email_code"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    email_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    code_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()

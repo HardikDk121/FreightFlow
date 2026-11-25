@@ -95,7 +95,7 @@ def test_pending_can_be_listed_for_several_stops_at_once(client, admin):
     _lr(client, h, packages=1, to_city="Jagdalpur")
     _lr(client, h, packages=1, to_city="Raipur")
     both = client.get("/pending/lrs", params={"destination": "Dhamtari, Jagdalpur"}, headers=h).json()
-    assert sorted(x["to_city"] for x in both) == ["Dhamtari", "Jagdalpur"]
+    assert sorted(x["to_city"] for x in both) == ["DHAMTARI", "JAGDALPUR"]
 
 
 def test_suggest_a_load_in_the_situations_the_app_meets(client, admin):

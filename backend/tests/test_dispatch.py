@@ -34,7 +34,7 @@ def test_pending_lists_waiting_goods_oldest_first(client, admin):
     surat = client.get("/pending/lrs", params={"destination": "surat"}, headers=h).json()
     assert [(x["pending"], x["days_waiting"]) for x in surat] == [(50, 3), (10, 1)]
     older = client.get("/pending/lrs", params={"older_than_days": 1}, headers=h).json()
-    assert [x["to_city"] for x in older] == ["Surat", "Delhi"]
+    assert [x["to_city"] for x in older] == ["SURAT", "DELHI"]  # cities are stored upper-case
     groups = client.get("/pending", headers=h).json()
     assert [(g["to_city"], g["lr_count"], g["packages"], g["days_waiting"]) for g in groups] == [
         ("SURAT", 2, 60, 3),

@@ -16,7 +16,7 @@ import hmac
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -46,7 +46,7 @@ from app.collections.schemas import (
     VisitCreate,
     VisitRead,
 )
-from app.db import set_tenant
+from app.db import SessionLocal, after_commit, set_tenant
 from app.errors import AppError, conflict, forbidden, not_found
 from app.lr import service as lr_service
 from app.models import (
@@ -439,20 +439,37 @@ def _notify(session: Session, outbox: Outbox, collection: Collection, receipt: M
         + f", recorded by {collector}. You now owe Rs {owing:,.2f}."
         + (f" Not right? Call {company.phone}." if company.phone else "")
     )
-    for channel, send in (("sms", outbox.sms), ("whatsapp", outbox.whatsapp)):
-        sent = send(phone, body)
-        session.add(
-            CustomerNotice(
-                company_id=collection.company_id,
-                collection_id=collection.id,
-                channel=channel,
-                phone=phone,
-                body=body,
-                status="sent" if sent else "not_sent",
-                reason=None if sent else f"No {channel} provider is configured yet.",
-            )
+    notices = [
+        CustomerNotice(
+            company_id=collection.company_id,
+            collection_id=collection.id,
+            channel=channel,
+            phone=phone,
+            body=body,
+            status="not_sent",
+            reason="Waiting for the payment to be saved.",
         )
+        for channel in ("sms", "whatsapp")
+    ]
+    session.add_all(notices)
     session.flush()
+    company_id, ids = collection.company_id, [n.id for n in notices]
+
+    def send() -> None:
+        """After the payment is committed: send, then record whether each message went."""
+        results = {}
+        for notice_id, (channel, deliver) in zip(ids, (("sms", outbox.sms), ("whatsapp", outbox.whatsapp))):
+            results[notice_id] = (deliver(phone, body), channel)
+        with SessionLocal.begin() as side:
+            set_tenant(side, company_id)
+            for notice_id, (sent, channel) in results.items():
+                side.execute(
+                    update(CustomerNotice)
+                    .where(CustomerNotice.id == notice_id)
+                    .values(status="sent" if sent else "not_sent", reason=None if sent else f"No {channel} provider is configured yet.")
+                )
+
+    after_commit(session, send)
 
 
 def record_visit(

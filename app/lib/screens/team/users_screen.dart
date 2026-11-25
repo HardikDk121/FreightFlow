@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../api/api_client.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
 
 const roleLabels = {
@@ -325,7 +326,7 @@ class _UserEditScreenState extends State<UserEditScreen> with Submitter {
         ),
         if (_role != 'admin') BranchField(value: _branch, onChanged: (b) => setState(() => _branch = b)),
         SwitchField(label: 'Active', value: _active, onChanged: (v) => setState(() => _active = v)),
-        AppTextField(label: 'Set a new password', controller: _newPassword, minLength: 8, obscure: true),
+        AppTextField(label: 'Set a new password', controller: _newPassword, obscure: true, check: newPassword, helper: 'At least $minPassword characters.'),
         if (_role != 'admin') ...[
           const SectionHeader('What they may do', icon: Icons.lock_outline),
           if (roleChanged)

@@ -45,7 +45,7 @@ def test_admin_resets_a_staff_password(client, admin):
 
 
 def test_company_update(client, admin):
-    ok = client.patch("/company", json={"gstin": "24abcde1234f1z5", "address": "Rajkot"}, headers=bearer(admin))
-    assert ok.status_code == 200 and ok.json()["gstin"] == "24ABCDE1234F1Z5"
+    ok = client.patch("/company", json={"gstin": "24abcde1234f1z6", "address": "Rajkot"}, headers=bearer(admin))
+    assert ok.status_code == 200 and ok.json()["gstin"] == "24ABCDE1234F1Z6"
     assert client.patch("/company", json={"gstin": "123"}, headers=bearer(admin)).status_code == 422
     assert client.patch("/company", json={"name": None}, headers=bearer(admin)).status_code == 422

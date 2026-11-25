@@ -6,7 +6,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.clock import today
-from app.validators import Gstin, Name, PatchModel, Phone
+from app.validators import Address, BusinessName, Gstin, PatchModel, Phone
 
 # One package: up to 15 m long and 5 tonnes.
 PackageSize = Annotated[float, Field(ge=1, le=1500)]
@@ -37,8 +37,8 @@ class _Read(BaseModel):
 
 
 class PartyCreate(BaseModel):
-    name: Name
-    address: str | None = None
+    name: BusinessName
+    address: Address | None = None
     gstin: Gstin | None = None
     phone: Phone | None = None
     latitude: Latitude | None = None
@@ -54,13 +54,20 @@ class PartyCreate(BaseModel):
 class PartyUpdate(PatchModel):
     not_nullable = frozenset({"name", "is_active"})
 
-    name: Name | None = None
-    address: str | None = None
+    name: BusinessName | None = None
+    address: Address | None = None
     gstin: Gstin | None = None
     phone: Phone | None = None
     latitude: Latitude | None = None
     longitude: Longitude | None = None
     is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def _coordinates_together(self) -> "PartyUpdate":
+        given = {"latitude", "longitude"} & self.model_fields_set
+        if len(given) == 1 or (len(given) == 2 and (self.latitude is None) != (self.longitude is None)):
+            raise ValueError("Give both latitude and longitude, or neither.")
+        return self
 
 
 class PartyRead(_Read):
@@ -73,7 +80,7 @@ class PartyRead(_Read):
 
 
 class ItemTypeCreate(BaseModel):
-    name: Name
+    name: BusinessName
     length_cm: PackageSize
     width_cm: PackageSize
     height_cm: PackageSize
@@ -86,7 +93,7 @@ class ItemTypeUpdate(PatchModel):
         {"name", "length_cm", "width_cm", "height_cm", "unit_weight_kg", "stackable", "is_active"}
     )
 
-    name: Name | None = None
+    name: BusinessName | None = None
     length_cm: PackageSize | None = None
     width_cm: PackageSize | None = None
     height_cm: PackageSize | None = None

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../validation.dart';
+
 /// One row as the API returns it.
 typedef JsonRow = Map<String, dynamic>;
 
@@ -21,7 +23,19 @@ class FieldSpec {
     this.row,
     this.hint,
     this.helper,
+    this.rule,
+    this.phone = false,
+    this.integer = false,
   });
+
+  /// A shared rule from validation.dart (business name, GSTIN, city...), the same as the server's.
+  final Rule? rule;
+
+  /// Shown with the country-code phone field.
+  final bool phone;
+
+  /// A decimal field that takes whole numbers only (model year).
+  final bool integer;
 
   /// Fields next to each other with the same [row] share one line on the form.
   final String? row;
@@ -56,15 +70,19 @@ class FieldSpec {
   /// The problem with a non-empty value, or null when it is fine.
   String? check(String value) {
     if (kind == FieldKind.decimal) {
-      final n = double.tryParse(value);
+      final n = number(value);
       if (n == null) return 'Enter a number';
+      if (integer && n != n.roundToDouble()) return 'Enter a whole number';
       if (min != null && n < min!) return 'Must be at least ${formatNumber(min!)}${unit == null ? '' : ' $unit'}';
       if (max != null && n > max!) return 'Must be at most ${formatNumber(max!)}${unit == null ? '' : ' $unit'}';
     } else if (pattern != null) {
       final compact = value.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
       if (!RegExp(pattern!).hasMatch(compact)) return patternHint;
     }
-    return null;
+    if (kind == FieldKind.list) {
+      return rule == null ? null : cityList(value);
+    }
+    return rule?.call(value);
   }
 }
 
@@ -80,7 +98,11 @@ class Resource {
     required this.icon,
     required this.intro,
     this.customForm,
+    this.crossCheck,
   });
+
+  /// A rule across fields (latitude with longitude), given the typed values by key.
+  final String? Function(Map<String, String> values)? crossCheck;
 
   /// Shown on the empty list and beside the form's heading.
   final IconData icon;
@@ -107,8 +129,6 @@ String _size(JsonRow row, String prefix) =>
     '${formatNumber(row['${prefix}length_cm'] as num)} × ${formatNumber(row['${prefix}width_cm'] as num)} × '
     '${formatNumber(row['${prefix}height_cm'] as num)} cm';
 
-const _gstinPattern = r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$';
-
 final parties = Resource(
   icon: Icons.groups_outlined,
   intro: 'Save a customer, sender or consignee.',
@@ -117,18 +137,14 @@ final parties = Resource(
   plural: 'Parties',
   titleKey: 'name',
   subtitle: (row) => [row['address'], row['gstin'], row['phone']].whereType<String>().join(' · '),
+  crossCheck: (v) => (v['latitude']!.trim().isEmpty) != (v['longitude']!.trim().isEmpty)
+      ? 'Give both latitude and longitude, or neither.'
+      : null,
   fields: const [
-    FieldSpec('name', 'Name', mandatory: true),
-    FieldSpec('address', 'Address'),
-    FieldSpec(
-      'gstin',
-      'GSTIN',
-      capitals: true,
-      pattern: _gstinPattern,
-      patternHint: 'A GST number has 15 characters, like 24AABCR4141H1ZQ',
-      helper: '15-character GST identification number',
-    ),
-    FieldSpec('phone', 'Phone', pattern: r'^\+?[0-9]{10,13}$', patternHint: 'Enter 10 to 13 digits'),
+    FieldSpec('name', 'Name', mandatory: true, rule: businessName),
+    FieldSpec('address', 'Address', rule: address),
+    FieldSpec('gstin', 'GSTIN', capitals: true, rule: gstin, helper: '15-character GST identification number'),
+    FieldSpec('phone', 'Phone', phone: true),
     FieldSpec('latitude', 'Latitude', kind: FieldKind.decimal, min: -90, max: 90, row: 'location'),
     FieldSpec(
       'longitude',
@@ -151,7 +167,7 @@ final itemTypes = Resource(
   titleKey: 'name',
   subtitle: (row) => '${_size(row, '')} · ${formatNumber(row['unit_weight_kg'] as num)} kg',
   fields: const [
-    FieldSpec('name', 'Name', mandatory: true),
+    FieldSpec('name', 'Name', mandatory: true, rule: businessName),
     FieldSpec('length_cm', 'Length', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm', row: 'size'),
     FieldSpec('width_cm', 'Width', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm', row: 'size'),
     FieldSpec('height_cm', 'Height', kind: FieldKind.decimal, mandatory: true, min: 1, max: 1500, unit: 'cm', row: 'size'),
@@ -195,7 +211,7 @@ final trucks = Resource(
     FieldSpec('inner_width_cm', 'Inner W', kind: FieldKind.decimal, mandatory: true, min: 100, max: 300, unit: 'cm', row: 'inner'),
     FieldSpec('inner_height_cm', 'Inner H', kind: FieldKind.decimal, mandatory: true, min: 100, max: 450, unit: 'cm', row: 'inner'),
     FieldSpec('payload_kg', 'Payload', kind: FieldKind.decimal, mandatory: true, min: 100, max: 60000, unit: 'kg', row: 'capacity'),
-    FieldSpec('model_year', 'Model year', kind: FieldKind.decimal, mandatory: true, min: 1990, max: 2100, row: 'capacity'),
+    FieldSpec('model_year', 'Model year', kind: FieldKind.decimal, mandatory: true, min: 1990, max: 2100, integer: true, row: 'capacity'),
     FieldSpec('insurance_expiry', 'Insurance expiry', kind: FieldKind.date, mandatory: true, row: 'papers'),
     FieldSpec('fitness_expiry', 'Fitness expiry', kind: FieldKind.date, mandatory: true, row: 'papers'),
     FieldSpec('current_station', 'Standing at', capitals: true),
@@ -230,6 +246,6 @@ final routes = Resource(
   subtitle: (row) => (row['stops'] as List).join(' → '),
   fields: const [
     FieldSpec('name', 'Route name', mandatory: true),
-    FieldSpec('stops', 'Stops in order, separated by commas', kind: FieldKind.list, mandatory: true, capitals: true),
+    FieldSpec('stops', 'Stops in order, separated by commas', kind: FieldKind.list, mandatory: true, capitals: true, rule: city),
   ],
 );

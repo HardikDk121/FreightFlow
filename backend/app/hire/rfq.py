@@ -17,8 +17,8 @@ from app.lr.service import _settings
 from app.models import Company, Rfq, RfqInvite, RfqQuote, User, Vendor
 from app.notify import Outbox
 from app.security import utcnow
+from app.validators import City
 
-City = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=2, max_length=30)]
 Money = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2)]
 # A vendor is reminded at most this often.
 REMIND_EVERY = dt.timedelta(hours=2)

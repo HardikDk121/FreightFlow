@@ -7,10 +7,16 @@ from tests.conftest import bearer
 from tests.test_dispatch import _lr, _truck
 
 
+def _person(email):
+    """A valid person's name from a test email: "ramesh@x" -> "Ramesh", "m@x" -> "M Staff"."""
+    local = email.split("@")[0].title()
+    return local if len(local) >= 2 else f"{local} Staff"
+
+
 def _staff(client, admin, email, role, branch_id=None):
     invite = client.post("/users/invites", json={"email": email, "role": role, "branch_id": branch_id}, headers=bearer(admin))
     assert invite.status_code == 201, invite.text
-    accepted = client.post("/auth/invites/accept", json={"token": invite.json()["token"], "name": email.split("@")[0].title(), "password": "staff-password"})
+    accepted = client.post("/auth/invites/accept", json={"token": invite.json()["token"], "name": _person(email), "password": "staff-password"})
     assert accepted.status_code == 201, accepted.text
     return accepted.json()
 

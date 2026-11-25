@@ -25,7 +25,8 @@ class StateRead(BaseModel):
 
 
 class EvaluateRequest(BaseModel):
-    value: Annotated[Decimal, Field(ge=0)] | None = None
+    # Left out (rather than 0 or negative) while the goods value is not known: the answer is then "value needed".
+    value: Annotated[Decimal, Field(gt=0)] | None = None
     from_state: StateCode
     to_state: StateCode
     category: Category = Category.REGULAR

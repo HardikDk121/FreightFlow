@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../api/api_client.dart';
 import '../../format.dart';
 import '../../theme/app_theme.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
 
 /// Admin only: the LR number series and the values every new LR starts with.
@@ -131,6 +132,7 @@ class _LrSettingsScreenState extends State<LrSettingsScreen> with Submitter {
         AppTextField(
           label: 'From city',
           controller: _fromCity,
+          check: city,
           capitalization: TextCapitalization.characters,
         ),
         AppTextField(

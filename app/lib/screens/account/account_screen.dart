@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 import '../../api/api_client.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
+import '../../widgets/phone_field.dart';
 import '../admin/admin_dashboard_screen.dart' show rateMatrixScreen;
 import '../masterdata/master_data_screen.dart';
 import '../money/money_screen.dart';
@@ -155,13 +157,9 @@ class _ProfileScreenState extends State<ProfileScreen> with Submitter {
             controller: _name,
             mandatory: true,
             capitalization: TextCapitalization.words,
+            check: personName,
           ),
-          AppTextField(
-            label: 'Phone',
-            controller: _phone,
-            keyboardType: TextInputType.phone,
-            autofillHints: const [AutofillHints.telephoneNumber],
-          ),
+          PhoneField(controller: _phone),
           ChoiceField<String>(
             label: 'Language',
             options: _languages,
@@ -182,11 +180,13 @@ class ChangePasswordScreen extends StatefulWidget {
 class _ChangePasswordScreenState extends State<ChangePasswordScreen> with Submitter {
   final _current = TextEditingController();
   final _next = TextEditingController();
+  final _confirm = TextEditingController();
 
   @override
   void dispose() {
     _current.dispose();
     _next.dispose();
+    _confirm.dispose();
     super.dispose();
   }
 
@@ -220,9 +220,18 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> with Submit
             label: 'New password',
             controller: _next,
             mandatory: true,
-            minLength: 8,
             obscure: true,
             autofillHints: const [AutofillHints.newPassword],
+            helper: 'At least $minPassword characters. A phrase of a few words works well.',
+            check: newPassword,
+          ),
+          AppTextField(
+            label: 'Confirm new password',
+            controller: _confirm,
+            mandatory: true,
+            obscure: true,
+            autofillHints: const [AutofillHints.newPassword],
+            check: (v) => v == _next.text ? null : 'The passwords do not match.',
           ),
         ],
       );
@@ -263,7 +272,8 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
   static String? _checkAddress(String value) {
     final lines = value.split('\n').where((l) => l.trim().isNotEmpty);
     if (lines.length > 3) return 'Up to 3 lines fit on the LR';
-    return lines.any((l) => l.trim().length > 48) ? 'Each line can be up to 48 characters' : null;
+    if (lines.any((l) => l.trim().length > 48)) return 'Each line can be up to 48 characters';
+    return address(value);
   }
 
   Future<void> _load() async {
@@ -326,6 +336,7 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
           controller: _name,
           mandatory: true,
           capitalization: TextCapitalization.words,
+          check: businessName,
         ),
         AppTextField(
           label: 'Tagline',
@@ -341,11 +352,10 @@ class _CompanyScreenState extends State<CompanyScreen> with Submitter {
           capitalization: TextCapitalization.words,
           helper: 'Up to 3 lines of 48 characters, printed top right on the LR.',
         ),
-        AppTextField(label: 'GSTIN', controller: _gstin, capitalization: TextCapitalization.characters),
-        AppTextField(
-          label: 'Contact number',
+        AppTextField(label: 'GSTIN', controller: _gstin, capitalization: TextCapitalization.characters, check: gstin),
+        PhoneField(
           controller: _phone,
-          keyboardType: TextInputType.phone,
+          label: 'Contact number',
           helper: 'Customers are told to call this number if a payment message looks wrong. Use the owner\'s.',
         ),
         AppTextField(

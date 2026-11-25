@@ -1,14 +1,26 @@
 from pydantic import BaseModel, EmailStr, Field
 
-from app.validators import Name, Password, Phone
+from app.validators import BusinessName, NewPassword, PersonName, Phone
 
 
 class RegisterRequest(BaseModel):
-    company_name: Name
-    name: Name
+    company_name: BusinessName
+    name: PersonName
     email: EmailStr
-    password: Password
+    password: NewPassword
     phone: Phone | None = None
+    # The code emailed by POST /auth/register/code, when email verification is on.
+    email_code: str | None = Field(default=None, pattern=r"^[0-9]{6}$")
+
+
+class EmailCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class EmailCodeSent(BaseModel):
+    required: bool
+    expires_in: int | None = None
+    resend_after: int | None = None
 
 
 class LoginRequest(BaseModel):
@@ -22,8 +34,8 @@ class RefreshRequest(BaseModel):
 
 class AcceptInviteRequest(BaseModel):
     token: str
-    name: Name
-    password: Password
+    name: PersonName
+    password: NewPassword
     phone: Phone | None = None
 
 
@@ -41,7 +53,7 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     login: str = Field(min_length=3, max_length=254)
     code: str = Field(pattern=r"^[0-9]{6}$")
-    new_password: Password
+    new_password: NewPassword
 
 
 class RecoverEmailRequest(BaseModel):

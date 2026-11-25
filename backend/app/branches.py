@@ -11,14 +11,13 @@ from app import audit
 from app.errors import conflict, not_found
 from app.models import Branch, Lr, User
 from app.security import utcnow
-from app.validators import Phone
+from app.validators import Address, BusinessName, City, Phone
 
-City = Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, min_length=1, max_length=30)]
 
 
 class BranchUpsert(BaseModel):
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=40)]
-    address: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)] | None = None
+    name: Annotated[BusinessName, StringConstraints(max_length=40)]
+    address: Address | None = None
     phone: Phone | None = None
     # Destination cities this branch delivers to.
     cities: list[City] = Field(default_factory=list, max_length=100)

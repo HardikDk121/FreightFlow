@@ -95,11 +95,11 @@ def test_register_report_paginates_and_totals(client, admin):
 def test_party_autocomplete(client, admin):
     h = bearer(admin)
     _create(client, admin)
-    client.post("/parties", json={"name": "Jalpa Mills", "gstin": "24AAACJ1111K1Z2"}, headers=h)
+    client.post("/parties", json={"name": "Jalpa Mills", "gstin": "24AAACJ1111K1Z4"}, headers=h)
     consignees = client.get("/lrs/parties", params={"q": "jal", "role": "consignee"}, headers=h).json()
     assert consignees == [
-        {"name": "Jalaram Enterprise", "gstin": "22AWCPP8803A1Z0", "city": "Raipur"},
-        {"name": "JALPA MILLS", "gstin": "24AAACJ1111K1Z2", "city": None},
+        {"name": "Jalaram Enterprise", "gstin": "22AWCPP8803A1Z0", "city": "RAIPUR"},
+        {"name": "JALPA MILLS", "gstin": "24AAACJ1111K1Z4", "city": None},
     ]
     consignors = client.get("/lrs/parties", params={"q": "rang", "role": "consignor"}, headers=h).json()
     assert consignors == [{"name": "Rangoli Laminate", "gstin": "24AABCR4141H1ZQ", "city": None}]

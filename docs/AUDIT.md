@@ -68,3 +68,24 @@ database, with row-level security on, as a reviewer would:
 - **Rate limits live in the database.** They are fine for one server; they are not a defence against a large distributed attack.
 - **Uploaded photos and statements are checked by type and size, not scanned for malware.** They are never executed or served back as HTML.
 - **No external penetration test was done.** "No issues found by these tests" is not the same as "secure".
+
+## Validation review of 25 November 2026 (screenshot QA)
+
+Every case in the review is now refused by the server with a plain message naming the field, and
+checked as the person types in the app. `tests/test_validation.py` holds one test per screen (43 cases).
+
+| Screen | Before | Now |
+|---|---|---|
+| Registration, Company settings | Company name "1", full name "1334", phone 1234567890 and 8-character passwords accepted | Company name needs 2+ characters with letters; names letters only; Indian mobiles 10 digits starting 6–9 (+91, 0 and spaces accepted and stripped; other countries with their code); passwords 12+ characters, not only numbers, not one of the 100,000 most common; confirm-password field; "An account with this email already exists"; optional 6-digit email code (10 minutes, 60-second resend, 5 tries) |
+| Freight / LR | Goods value "-0000" flagged but the e-way banner still said "No e-way bill needed"; "@RAJKOT" and "##AHEMDABAD" accepted | Goods value must be above 0, and the banner says "Goods value needed" until it is; cities letters only, stored in capitals; HSN 4/6/8 digits, e-way bill 12 digits, ENR-03 15 characters; ".5" read as 0.5 |
+| Item type | Name "11" accepted | Names need letters; sizes and weight above 0; "Can be stacked" saved and reloaded (tested) |
+| Party | Name and address "1", phone 1234567890 accepted; GSTIN format only | Names and addresses need letters; GSTIN state code and check character verified; latitude and longitude together, also when editing |
+| Truck owner | Raw regex shown in the PAN error; bank details "jduwf" accepted | "Enter a valid 10-character PAN, like ABCDE1234F."; bank details must include the account number |
+| Truck | Already validated | Unchanged; tests added for format, duplicates, years, sizes and impossible dates |
+| Branch | Name "11", cities "1,2,3,4,5" accepted | Names and cities need letters; no empty or repeated cities; a city belongs to one branch, any case |
+| Visit | Negative and over-balance amounts already refused | Unchanged; tests for each status and amount combination; customer SMS/WhatsApp now sent only after the payment is saved |
+| Contract | Destination "50" accepted | Destinations are city names, not repeated; end date not before start; rates above 0 |
+| All screens | Schema messages could reach the screen | Every input error is translated into plain words; no regex, type name or input echo in any response (checked across every endpoint) |
+
+Existing Indian phone numbers are converted to the 10-digit form by migration 0013, so sign-in by
+phone works however the number was first typed.

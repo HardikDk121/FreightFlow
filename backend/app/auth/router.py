@@ -1,10 +1,12 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
 from sqlalchemy.orm import Session
 
-from app.auth import recovery, service
+from app.auth import email_codes, recovery, service
 from app.auth.schemas import (
     Accepted,
     AcceptInviteRequest,
+    EmailCodeRequest,
+    EmailCodeSent,
     ForgotPasswordRequest,
     LoginRequest,
     RecoverEmailRequest,
@@ -15,6 +17,7 @@ from app.auth.schemas import (
 )
 from app.db import get_session
 from app.deps import current_user
+from app.errors import conflict
 from app.models import User
 from app.notify import Outbox, get_outbox
 
@@ -26,7 +29,18 @@ MAX_REGISTRATIONS_PER_IP_PER_HOUR = 5
 def register(body: RegisterRequest, request: Request, session: Session = Depends(get_session)) -> TokenPair:
     # One network address may register only a few companies an hour.
     recovery.throttle(session, {recovery.throttle_key("register-ip", _ip(request)): MAX_REGISTRATIONS_PER_IP_PER_HOUR})
+    if email_codes.email_taken(session, body.email):
+        raise conflict("An account with this email already exists. Sign in, or reset your password.")
+    email_codes.check_code(session, body.email, body.email_code)
     return service.register(session, body)
+
+
+@router.post("/register/code", response_model=EmailCodeSent)
+def send_signup_code(
+    body: EmailCodeRequest, request: Request, session: Session = Depends(get_session), outbox: Outbox = Depends(get_outbox)
+) -> EmailCodeSent:
+    """Email a 6-digit code to the address signing up. Answers {"required": false} when verification is off."""
+    return EmailCodeSent(**email_codes.send_code(session, outbox, body.email, _ip(request)))
 
 
 @router.post("/login", response_model=TokenPair)

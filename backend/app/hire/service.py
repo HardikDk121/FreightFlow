@@ -26,7 +26,7 @@ from app.models import (
     VendorPayment,
 )
 from app.permissions import P, has
-from app.validators import Phone
+from app.validators import BusinessName, Pan, Phone
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 Money = Annotated[Decimal, Field(gt=0, max_digits=12, decimal_places=2)]
@@ -34,11 +34,18 @@ ZERO = Decimal(0)
 
 
 class VendorIn(BaseModel):
-    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=80)]
+    name: Annotated[BusinessName, StringConstraints(max_length=80)]
     kind: Literal["truck_owner", "broker"] = "truck_owner"
     phone: Phone | None = None
-    pan: Annotated[str, StringConstraints(strip_whitespace=True, to_upper=True, pattern=r"^[A-Z]{5}[0-9]{4}[A-Z]$")] | None = None
-    bank_details: Annotated[str, StringConstraints(strip_whitespace=True, max_length=240)] | None = None
+    pan: Pan | None = None
+    # Free text (account name, number, IFSC, bank), but with something real in it.
+    bank_details: Annotated[str, StringConstraints(strip_whitespace=True, min_length=8, max_length=240)] | None = None
+
+    @model_validator(mode="after")
+    def _bank(self) -> "VendorIn":
+        if self.bank_details and sum(ch.isdigit() for ch in self.bank_details) < 6:
+            raise ValueError("Bank details need the account number (and IFSC), or leave them empty.")
+        return self
     is_active: bool = True
 
 

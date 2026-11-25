@@ -5,8 +5,10 @@ import '../../api/api_client.dart';
 import '../../format.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
+import '../../widgets/phone_field.dart';
 
 const _expenseKinds = {
   'loading_labour': 'Loading labour',
@@ -130,11 +132,21 @@ class _VendorFormState extends State<_VendorForm> with Submitter {
         submitLabel: 'Save',
         onSubmit: () => submit(_save),
         children: [
-          AppTextField(label: 'Name', controller: _name, mandatory: true, minLength: 2, capitalization: TextCapitalization.words),
+          AppTextField(label: 'Name', controller: _name, mandatory: true, capitalization: TextCapitalization.words, check: businessName),
           ChoiceField<String>(label: 'Kind', options: const {'truck_owner': 'Truck owner', 'broker': 'Broker'}, value: _kind, onChanged: (v) => setState(() => _kind = v)),
-          AppTextField(label: 'Phone', controller: _phone, keyboardType: TextInputType.phone),
-          AppTextField(label: 'PAN', controller: _pan, capitalization: TextCapitalization.characters),
-          AppTextField(label: 'Bank details', controller: _bank, lines: 3, helper: 'Account name, number and IFSC, for paying the hire.'),
+          PhoneField(controller: _phone),
+          AppTextField(label: 'PAN', controller: _pan, capitalization: TextCapitalization.characters, hint: 'ABCDE1234F', check: pan),
+          AppTextField(
+            label: 'Bank details',
+            controller: _bank,
+            lines: 3,
+            helper: 'Account name, number and IFSC, for paying the hire.',
+            check: (v) => v.trim().length > 240
+                ? 'Use at most 240 characters.'
+                : RegExp(r'[0-9]').allMatches(v).length < 6
+                    ? 'Include the account number (and IFSC), or leave this empty.'
+                    : null,
+          ),
           if (widget.vendor != null) SwitchField(label: 'Active', value: _active, onChanged: (v) => setState(() => _active = v)),
         ],
       );
@@ -685,8 +697,8 @@ class _RfqFormState extends State<_RfqForm> with Submitter {
         submitLabel: 'Send request',
         onSubmit: () => submit(_save),
         children: [
-          AppTextField(label: 'From', controller: _origin, mandatory: true, capitalization: TextCapitalization.characters),
-          AppTextField(label: 'To', controller: _destination, mandatory: true, capitalization: TextCapitalization.characters),
+          AppTextField(label: 'From', controller: _origin, mandatory: true, capitalization: TextCapitalization.characters, check: city),
+          AppTextField(label: 'To', controller: _destination, mandatory: true, capitalization: TextCapitalization.characters, check: city),
           AppTextField(
             label: 'Load',
             controller: _weight,
@@ -698,14 +710,13 @@ class _RfqFormState extends State<_RfqForm> with Submitter {
           AppTextField(label: 'Truck type', controller: _truckType, hint: 'e.g. 32 ft closed body'),
           PickerField(
             label: 'Needed on',
-            placeholder: 'Select date',
             value: dayLabel(_needed.toIso8601String().substring(0, 10)),
             icon: Icons.calendar_today_outlined,
             onTap: () async {
               final today = DateUtils.dateOnly(DateTime.now());
               final picked = await showDatePicker(context: context, firstDate: today, lastDate: today.add(const Duration(days: 60)), initialDate: _needed);
               if (picked != null) setState(() => _needed = picked);
-            },
+            }, placeholder: '',
           ),
           AppTextField(label: 'Note', controller: _note, capitalization: TextCapitalization.sentences),
           const SectionHeader('Ask', icon: Icons.local_shipping_outlined),

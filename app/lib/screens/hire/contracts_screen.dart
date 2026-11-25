@@ -5,6 +5,7 @@ import '../../api/api_client.dart';
 import '../../format.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
 
@@ -135,6 +136,8 @@ class _ContractFormState extends State<_ContractForm> with Submitter {
   }
 
   Future<void> _save() async {
+    if (_ends.isBefore(_starts)) throw const ApiException(0, 'The contract ends before it starts. Check the To date.');
+    if (!_rates.any((r) => r.destination.text.trim().isNotEmpty)) throw const ApiException(0, 'Add at least one destination with its rate.');
     final terms = _terms.text.trim();
     final body = {
       'party_name': _party.text.trim(),
@@ -144,7 +147,7 @@ class _ContractFormState extends State<_ContractForm> with Submitter {
       'is_active': _active,
       'rates': [
         for (final r in _rates)
-          if (r.destination.text.trim().isNotEmpty) {'destination': r.destination.text.trim(), 'basis': r.basis, 'rate': r.rate.text.trim()},
+          if (r.destination.text.trim().isNotEmpty) {'destination': tidy(r.destination.text).toUpperCase(), 'basis': r.basis, 'rate': normalizeNumber(r.rate.text)},
       ],
     };
     final api = context.read<ApiClient>();
@@ -159,69 +162,77 @@ class _ContractFormState extends State<_ContractForm> with Submitter {
 
   @override
   Widget build(BuildContext context) => FormPage(
-    title: widget.contract == null ? 'New contract' : 'Edit contract',
-    formKey: formKey,
-    busy: busy,
-    error: error,
-    submitLabel: 'Save contract',
-    onSubmit: () => submit(_save),
-    children: [
-      AppTextField(label: 'Customer (who pays)', controller: _party, mandatory: true, minLength: 2, capitalization: TextCapitalization.words),
-      Row(
+        title: widget.contract == null ? 'New contract' : 'Edit contract',
+        formKey: formKey,
+        busy: busy,
+        error: error,
+        submitLabel: 'Save contract',
+        onSubmit: () => submit(_save),
         children: [
-          Expanded(
-            child: PickerField(
-              label: 'From',
-              placeholder: 'Select start date',
-              value: dayLabel(_starts.toIso8601String().substring(0, 10)),
-              icon: Icons.calendar_today_outlined,
-              onTap: () => _pick(true),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: PickerField(
-              label: 'To',
-              placeholder: 'Select end date',
-              value: dayLabel(_ends.toIso8601String().substring(0, 10)),
-              icon: Icons.calendar_today_outlined,
-              onTap: () => _pick(false),
-            ),
-          ),
-        ],
-      ),
-      const SectionHeader('Agreed rates', icon: Icons.currency_rupee),
-      for (final r in _rates)
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(flex: 3, child: AppTextField(label: 'Destination', controller: r.destination, capitalization: TextCapitalization.characters)),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 2,
-              child: ChoiceField<String>(label: 'Per', options: const {'per_kg': 'kg', 'per_article': 'article'}, value: r.basis, onChanged: (v) => setState(() => r.basis = v)),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              flex: 2,
-              child: AppTextField(
-                label: 'Rate',
-                controller: r.rate,
-                unit: 'Rs',
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                check: (v) => r.destination.text.trim().isEmpty || (double.tryParse(v) ?? 0) > 0 ? null : 'Rate',
+          AppTextField(label: 'Customer (who pays)', controller: _party, mandatory: true, capitalization: TextCapitalization.words, check: businessName),
+          Row(
+            children: [
+              Expanded(
+                child: PickerField(
+                  label: 'From',
+                  placeholder: 'Select start date',
+                  value: dayLabel(_starts.toIso8601String().substring(0, 10)),
+                  icon: Icons.calendar_today_outlined,
+                  onTap: () => _pick(true),
+                ),
               ),
+// ...
+              Expanded(
+                child: PickerField(
+                  label: 'To',
+                  placeholder: 'Select end date',
+                  value: dayLabel(_ends.toIso8601String().substring(0, 10)),
+                  icon: Icons.calendar_today_outlined,
+                  onTap: () => _pick(false),
+                ),
+              ),
+            ],
+          ),
+          const SectionHeader('Agreed rates', icon: Icons.currency_rupee),
+          for (final r in _rates)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: AppTextField(
+                    label: 'Destination',
+                    controller: r.destination,
+                    capitalization: TextCapitalization.characters,
+                    check: (v) => city(v) ?? (_rates.where((o) => tidy(o.destination.text).toUpperCase() == tidy(v).toUpperCase()).length > 1 ? 'Listed twice' : null),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: ChoiceField<String>(label: 'Per', options: const {'per_kg': 'kg', 'per_article': 'article'}, value: r.basis, onChanged: (v) => setState(() => r.basis = v)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: AppTextField(
+                    label: 'Rate',
+                    controller: r.rate,
+                    unit: 'Rs',
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    check: (v) => r.destination.text.trim().isEmpty ? null : positive(max: 99999999)(v),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(icon: const Icon(Icons.add), label: const Text('Another destination'), onPressed: () => setState(() => _rates.add(_RateRow()))),
-      ),
-      AppTextField(label: 'Terms', controller: _terms, lines: 3, capitalization: TextCapitalization.sentences, helper: 'Anything else agreed: billing cycle, minimum load, who pays hamali.'),
-      if (widget.contract != null) SwitchField(label: 'In force', value: _active, onChanged: (v) => setState(() => _active = v)),
-    ],
-  );
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(icon: const Icon(Icons.add), label: const Text('Another destination'), onPressed: () => setState(() => _rates.add(_RateRow()))),
+          ),
+          AppTextField(label: 'Terms', controller: _terms, lines: 3, capitalization: TextCapitalization.sentences, helper: 'Anything else agreed: billing cycle, minimum load, who pays hamali.'),
+          if (widget.contract != null) SwitchField(label: 'In force', value: _active, onChanged: (v) => setState(() => _active = v)),
+        ],
+      );
 }
 
 /// What the office tells customers each destination usually takes. Used to judge late trips; not a promise.
@@ -286,7 +297,7 @@ class _TransitTimesScreenState extends State<TransitTimesScreen> with Submitter 
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(flex: 3, child: AppTextField(label: 'Destination', controller: dest, capitalization: TextCapitalization.characters)),
+                Expanded(flex: 3, child: AppTextField(label: 'Destination', controller: dest, capitalization: TextCapitalization.characters, check: city)),
                 const SizedBox(width: 8),
                 Expanded(flex: 2, child: AppTextField(label: 'From', controller: min, unit: 'days', keyboardType: TextInputType.number, check: (v) => dest.text.trim().isEmpty || (int.tryParse(v) ?? 0) > 0 ? null : 'Days')),
                 const SizedBox(width: 8),

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     # "production" hides the interactive API docs, keeps message contents out of the log, and
     # sends HSTS (set https=true only when the API is reached over HTTPS, as through Caddy below).
     env: Literal["development", "production"] = "development"
+    # "required": a new company's owner must enter a code emailed to them before the account is
+    # created. Needs an email service (FF_SMTP_*); Resend works through its SMTP relay. "off" skips it.
+    # Unset: required whenever SMTP is configured.
+    email_verification: Literal["required", "off"] | None = None
     https: bool = False
     access_ttl_minutes: int = 15
     refresh_ttl_days: int = 30
@@ -30,6 +34,12 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str = "claude-haiku-5-5"
 
+    @property
+    def verify_signup_email(self) -> bool:
+        if self.email_verification is not None:
+            return self.email_verification == "required"
+        return self.smtp_host is not None
+
     @model_validator(mode="after")
     def _no_placeholder_secrets(self) -> "Settings":
         """Refuse to start in production with the example secret from .env.example."""
@@ -37,7 +47,7 @@ class Settings(BaseSettings):
             raise ValueError("FF_JWT_SECRET is still the example value. Generate a real one (see .env.example).")
         return self
 
-    @field_validator("smtp_host", "smtp_user", "smtp_password", "llm_api_key", mode="before")
+    @field_validator("smtp_host", "smtp_user", "smtp_password", "llm_api_key", "email_verification", mode="before")
     @classmethod
     def _blank_means_unset(cls, value: str | None) -> str | None:
         """Docker Compose passes an unset variable as an empty string."""

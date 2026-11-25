@@ -12,7 +12,7 @@ from tests.conftest import bearer
 
 # Endpoints anyone may call without signing in.
 PUBLIC = {
-    ("GET", "/health"), ("POST", "/auth/register"), ("POST", "/auth/login"), ("POST", "/auth/refresh"),
+    ("GET", "/health"), ("POST", "/auth/register"), ("POST", "/auth/register/code"), ("POST", "/auth/login"), ("POST", "/auth/refresh"),
     ("POST", "/auth/invites/accept"), ("POST", "/auth/password/forgot"), ("POST", "/auth/password/reset"),
     ("POST", "/auth/email/recover"), ("GET", "/receipts/verify/{token}"), ("GET", "/r/{token}"),
 }

@@ -37,3 +37,4 @@ packages = ["app", "app.auth", "app.users", "app.company", "app.masterdata", "ap
 
 [tool.setuptools.package-data]
 "app.lr" = ["*.json"]
+"app.auth" = ["*.txt"]

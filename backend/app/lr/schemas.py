@@ -9,7 +9,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstra
 
 from app.eway.rules import Category, Leg
 from app.eway.schemas import DistanceKm, StateCode
-from app.validators import Gstin, PatchModel
+from app.validators import BusinessName, City, EnrolmentId, EwayBillNo, Gstin, HsnCode, Pan, PatchModel
 
 Amount = Annotated[Decimal, Field(ge=0, le=Decimal("99999999.99"), decimal_places=2)]
 PositiveWeight = Annotated[Decimal, Field(gt=0, le=Decimal("999999.99"), decimal_places=2)]
@@ -23,17 +23,8 @@ def _prefix(value: str) -> str:
 
 
 Prefix = Annotated[str, AfterValidator(_prefix)]
-EwayBillNo = Annotated[str, StringConstraints(pattern=r"^[0-9]{12}$")]
-
-
-def _pan(value: str) -> str:
-    value = value.strip().upper()
-    if not re.fullmatch(r"[A-Z]{5}[0-9]{4}[A-Z]", value):
-        raise ValueError("A PAN has 10 characters, like ABCDE1234F.")
-    return value
-
-
-Pan = Annotated[str, AfterValidator(_pan)]
+# Names on the LR fit a 60-character box.
+PartyName = Annotated[BusinessName, StringConstraints(max_length=60)]
 
 
 def _text(max_length: int) -> type[str]:
@@ -52,12 +43,12 @@ class LrFields(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     lr_date: dt.date
-    from_city: _text(30)
-    to_city: _text(30)
+    from_city: City
+    to_city: City
     freight_by: FreightBy
-    consignor_name: _text(60)
+    consignor_name: PartyName
     consignor_gstin: Gstin | None = None
-    consignee_name: _text(60)
+    consignee_name: PartyName
     consignee_gstin: Gstin | None = None
     goods_description: _text(50)
     packages: int = Field(gt=0, le=99999)
@@ -74,7 +65,8 @@ class LrFields(BaseModel):
     hamali: Amount = Decimal("0")
     other_charges: Amount = Decimal("0")
     st_charges: Amount = Decimal("0")
-    value: Amount | None = None
+    # Goods value, when given, must be more than zero (it decides the e-way bill).
+    value: Annotated[Decimal, Field(gt=0, le=Decimal("99999999.99"), decimal_places=2)] | None = None
     eway_bill_no: EwayBillNo | None = None
     item_type_id: uuid.UUID | None = None
     # E-way bill inputs. A party is "registered" when its GST number is given.
@@ -83,10 +75,10 @@ class LrFields(BaseModel):
     goods_category: Category = Category.REGULAR
     trip_leg: Leg = Leg.DIRECT
     distance_km: DistanceKm | None = None
-    hsn_code: Annotated[str, StringConstraints(pattern=r"^[0-9]{4}([0-9]{2}){0,2}$")] | None = None
+    hsn_code: HsnCode | None = None
     consignor_pan: Pan | None = None
     consignee_pan: Pan | None = None
-    enrolment_id: Annotated[str, StringConstraints(to_upper=True, pattern=r"^[0-9A-Za-z]{15}$")] | None = None
+    enrolment_id: EnrolmentId | None = None
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "LrFields":
@@ -217,7 +209,7 @@ class LrSettingsUpdate(PatchModel):
 
     prefix: Prefix | None = None
     next_number: Annotated[int, Field(gt=0, le=2_000_000_000)] | None = None
-    from_city: _text(30) | None = None
+    from_city: City | None = None
     default_st_charges: Amount | None = None
     # When a credit period starts counting: at delivery, or at booking.
     credit_from: Literal["delivery", "booking"] | None = None

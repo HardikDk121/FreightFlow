@@ -15,7 +15,7 @@ I have not seen the server itself. Before starting, check two things on it:
 ## 1. Back up first (required)
 
 The API container applies database migrations when it starts. This version adds migrations up to
-`0012`; some cannot be undone (`0008`, `0010`), so the backup is the way back.
+`0013` (0013 also rewrites stored Indian phone numbers to their 10 digits); some cannot be undone (`0008`, `0010`), so the backup is the way back.
 
 ```sh
 cd /path/to/freightflow                      # the folder with docker-compose.yml on the server

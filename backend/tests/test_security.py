@@ -96,18 +96,27 @@ def test_another_companys_records_cannot_be_read_or_changed_by_id(client, admin)
     assert client.get(f"/lrs/{lr['id']}", headers=a).json()["status"] == "confirmed"
 
 
-def test_hostile_text_is_stored_as_text_and_never_executed(client, admin):
+def test_hostile_text_is_refused_in_names_and_stored_as_text_elsewhere(client, admin):
     h = bearer(admin)
     script = "<script>alert('x')</script>"
-    party = client.post("/parties", json={"name": script}, headers=h).json()
-    assert party["name"] == script  # stored exactly; the app shows it as text
-    lr = _lr(client, h, consignor_name="Robert'); DROP TABLE lr;--", consignor_gstin=None, consignor_pan="AABCR4141H")
-    assert client.get(f"/lrs/{lr['id']}", headers=h).json()["consignor_name"] == "Robert'); DROP TABLE lr;--"
-    # The one HTML page (the receipt check) escapes what it shows.
-    receipt = _receipt(client, admin, _lr(client, h, consignee_name=script, st_charges="10"))
-    token = receipt["verify_token"]
-    page = client.get(f"/r/{token}")
-    assert script not in page.text and "&lt;script&gt;" in page.text
+    # Names are names: markup and SQL punctuation are refused with a plain message.
+    party = client.post("/parties", json={"name": script}, headers=h)
+    assert party.status_code == 422 and "<" not in party.json()["error"]["message"]
+    assert client.post("/parties", json={"name": "Robert'); DROP TABLE lr;--"}, headers=h).status_code == 422
+    # Free text (goods description) keeps whatever was typed, exactly, as text.
+    lr = _lr(client, h, goods_description="Robert'); DROP TABLE lr;--")
+    assert client.get(f"/lrs/{lr['id']}", headers=h).json()["goods_description"] == "Robert'); DROP TABLE lr;--"
+    # The one HTML page (the receipt check) escapes whatever it shows.
+    import datetime as dt
+    from decimal import Decimal
+
+    from app.collections.printing import verification_page
+    from app.collections.schemas import ReceiptVerification
+
+    page = verification_page(ReceiptVerification(
+        company_name=script, receipt_number="MR-1", payer_name=script, lr_numbers=["LR-1"], amount=Decimal(1),
+        collected=Decimal(0), status="open", issued_on=dt.date(2026, 11, 25)))
+    assert script not in page and "&lt;script&gt;" in page
 
 
 def test_bad_bodies_get_clear_answers_not_crashes(client, admin):

@@ -10,6 +10,7 @@ import '../../api/api_client.dart';
 import '../../format.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
 import '../../widgets/suggest_field.dart';
 import 'lr_page.dart';
@@ -348,11 +349,13 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   Future<void> _evaluate() async {
     if (_fromState == null || _toState == null) return;
     final request = ++_evaluateRequest;
-    final value = double.tryParse(_value.text.trim());
+    // Only a valid goods value is sent. Blank or invalid ("-0000") gets "goods value needed", never
+    // a definite "no e-way bill needed".
+    final value = _checkAboveZero(_value.text.trim()) == null ? number(_value.text) : null;
     final distance = int.tryParse(_distance.text.trim());
     try {
       final result = await context.read<ApiClient>().post('/eway/evaluate', {
-        if (value != null && value >= 0) 'value': _value.text.trim(),
+        if (value != null) 'value': normalizeNumber(_value.text),
         'from_state': _fromState,
         'to_state': _toState,
         'category': _category,
@@ -465,11 +468,9 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
     return n == null || n < 1 || n > 4000 ? 'Whole km, 1 to 4000' : null;
   }
 
-  static String? _checkHsn(String value) =>
-      RegExp(r'^[0-9]{4}([0-9]{2}){0,2}$').hasMatch(value) ? null : 'An HSN code has 4, 6 or 8 digits';
+  static String? _checkHsn(String value) => hsnCode(value);
 
-  static String? _checkEnrolment(String value) =>
-      RegExp(r'^[0-9A-Za-z]{15}$').hasMatch(value) ? null : 'An enrolment ID has 15 characters';
+  static String? _checkEnrolment(String value) => enrolmentId(value);
 
   /// When the person leaves the consignor fields, reuse what this consignor's last LR had.
   Future<void> _suggestFromLastLr() async {
@@ -621,9 +622,11 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   }
 
   static String? _checkAboveZero(String value) {
-    final n = double.tryParse(value);
+    final n = number(value);
     if (n == null) return 'Enter a number';
-    return n <= 0 ? 'Must be more than 0' : null;
+    if (n <= 0) return 'Must be more than 0';
+    final decimals = value.contains('.') ? value.trim().split('.').last.length : 0;
+    return decimals > 2 ? 'Use at most 2 decimal places' : null;
   }
 
   static String? _checkRate(String value) {
@@ -633,18 +636,17 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   }
 
   static String? _checkPackages(String value) {
-    final n = int.tryParse(value);
-    return n == null || n < 1 ? 'Enter a whole number, 1 or more' : null;
+    final n = int.tryParse(value.trim());
+    if (n == null || n < 1) return 'Enter a whole number, 1 or more';
+    return n > 99999 ? 'Must be at most 99999' : null;
   }
 
-  static String? _checkGstin(String value) =>
-      _gstin.hasMatch(value.toUpperCase()) ? null : 'A GST number has 15 characters, like 24AABCR4141H1ZQ';
+  static String? _checkGstin(String value) => gstin(value);
 
-  static String? _checkEwayBill(String value) =>
-      RegExp(r'^[0-9]{12}$').hasMatch(value) ? null : 'An e-way bill number has 12 digits';
+  static String? _checkEwayBill(String value) => ewayBillNumber(value);
 
   String? _checkTo(String value) =>
-      value.toUpperCase() == _from.text.trim().toUpperCase() ? 'From and To cannot be the same' : null;
+      city(value) ?? (tidy(value).toUpperCase() == tidy(_from.text).toUpperCase() ? 'From and To cannot be the same' : null);
 
   String? _checkConsigneeGstin(String value) => value.toUpperCase() == _consignorGstin.text.trim().toUpperCase()
       ? 'Same as the consignor GST number'
@@ -666,14 +668,14 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
   Map<String, dynamic> _fields() {
     final body = <String, dynamic>{
       'lr_date': _isoDate(_date),
-      'from_city': _from.text.trim(),
-      'to_city': _to.text.trim(),
+      'from_city': tidy(_from.text).toUpperCase(),
+      'to_city': tidy(_to.text).toUpperCase(),
       'freight_by': _freightBy,
-      'consignor_name': _consignor.text.trim(),
-      'consignee_name': _consignee.text.trim(),
+      'consignor_name': tidy(_consignor.text),
+      'consignee_name': tidy(_consignee.text),
       'goods_description': _goods.text.trim(),
       'packages': int.parse(_packages.text.trim()),
-      'weight': _weight.text.trim(),
+      'weight': normalizeNumber(_weight.text),
     };
     if (_goodsClass.isNotEmpty && _rateRuleId != null) body['rate_rule_id'] = _rateRuleId;
     body['charge_basis'] = _goodsClass.isNotEmpty ? 'matrix' : _basis;
@@ -690,9 +692,11 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
       'value': _value,
       'eway_bill_no': _ewayBill,
     };
+    const numbers = {'weight_per_package', 'charged_weight', 'rate', 'freight', 'hamali', 'other_charges', 'st_charges', 'value'};
     for (final entry in optional.entries) {
       final text = entry.value.text.trim();
-      if (text.isNotEmpty) body[entry.key] = text;
+      // ".5" goes as "0.5"; codes go without spaces and in capitals.
+      if (text.isNotEmpty) body[entry.key] = numbers.contains(entry.key) ? normalizeNumber(text) : text.replaceAll(' ', '').toUpperCase();
     }
     if (_itemTypeId != null) body['item_type_id'] = _itemTypeId;
     body.addAll({'from_state': _fromState, 'to_state': _toState, 'goods_category': _category, 'trip_leg': _leg});
@@ -800,6 +804,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
         label: label,
         controller: controller,
         mandatory: true,
+        check: (v) => v.trim().length > 60 ? 'Use at most 60 characters.' : businessName(v),
         highlighted: _filledByApp.contains(role),
         search: (query) async {
           final rows = await context.read<ApiClient>().get('/lrs/parties', query: {'q': query, 'role': role});
@@ -879,7 +884,7 @@ class _LrFormScreenState extends State<LrFormScreen> with Submitter {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           child: Column(
             children: [
-              _field('from', 'From', _from, mandatory: true),
+              _field('from', 'From', _from, mandatory: true, check: city),
               _field('to', 'To', _to, mandatory: true, check: _checkTo),
             ],
           ),

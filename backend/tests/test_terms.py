@@ -111,26 +111,26 @@ def test_release_rules_follow_payment_terms(client, admin):
 def test_ageing_and_where_the_money_is_stuck(client, admin):
     h = bearer(admin)
     collector = add_staff(client, admin, "r@shree.example", "collector")
-    for days, amount, name in ((3, "100", "A"), (10, "200", "A"), (20, "300", "B"), (45, "400", "B"), (90, "500", "C")):
+    for days, amount, name in ((3, "100", "Alpha Co"), (10, "200", "Alpha Co"), (20, "300", "Beta Co"), (45, "400", "Beta Co"), (90, "500", "Chetan Co")):
         _lr(client, h, days_ago=days, st_charges=amount, freight_by="Paid", consignor_name=name, consignor_gstin=None, consignor_pan="AABCR4141H", consignee_pan="AWCPP8803A", consignee_gstin=None)
-    _lr(client, h, st_charges="50", freight_by="Paid", consignor_name="A", consignor_gstin=None, consignor_pan="AABCR4141H", consignee_pan="AWCPP8803A", consignee_gstin=None)
+    _lr(client, h, st_charges="50", freight_by="Paid", consignor_name="Alpha Co", consignor_gstin=None, consignor_pan="AABCR4141H", consignee_pan="AWCPP8803A", consignee_gstin=None)
     ageing = client.get("/receivables/ageing", headers=h).json()
     rows = {r["party"]: r for r in ageing["rows"]}
     # due today is not yet late
-    assert (rows["A"]["not_due"], rows["A"]["days_0_7"], rows["A"]["days_8_15"]) == ("50.00", "100.00", "200.00")
-    assert (rows["B"]["days_16_30"], rows["B"]["days_31_60"], rows["C"]["days_60_plus"]) == ("300.00", "400.00", "500.00")
+    assert (rows["Alpha Co"]["not_due"], rows["Alpha Co"]["days_0_7"], rows["Alpha Co"]["days_8_15"]) == ("50.00", "100.00", "200.00")
+    assert (rows["Beta Co"]["days_16_30"], rows["Beta Co"]["days_31_60"], rows["Chetan Co"]["days_60_plus"]) == ("300.00", "400.00", "500.00")
     assert ageing["totals"]["total"] == "1550.00"
-    assert [r["party"] for r in ageing["rows"]] == ["B", "C", "A"]
+    assert [r["party"] for r in ageing["rows"]] == ["Beta Co", "Chetan Co", "Alpha Co"]
 
-    # C pays two old LRs late: a repeat late payer
+    # a customer pays two old LRs late: a repeat late payer
     for days in (60, 50):
         lr = _lr(client, h, days_ago=days, st_charges="10", freight_by="Paid", consignor_name="Slow Payer", consignor_gstin=None, consignor_pan="AABCR4141H", consignee_pan="AWCPP8803A", consignee_gstin=None)
         _visit(client, collector, _receipt(client, admin, lr), "paid", method="cash", amount="10")
-    client.put("/credit-terms", json={"payer_name": "B", "payment_terms": "credit", "credit_limit": "800", "credit_days": 30}, headers=h)
+    client.put("/credit-terms", json={"payer_name": "Beta Co", "payment_terms": "credit", "credit_limit": "800", "credit_days": 30}, headers=h)
     stuck = client.get("/receivables/priorities", headers=h).json()
-    assert stuck["largest"][0]["party"] == "B"
-    assert stuck["oldest_overdue"][0] == {"party": "C", "lr_number": stuck["oldest_overdue"][0]["lr_number"], "balance": "500.00", "days_overdue": 90}
-    assert stuck["near_limit"] == [{"party": "B", "outstanding": "700.00", "credit_limit": "800.00", "used_pct": 88}]
+    assert stuck["largest"][0]["party"] == "Beta Co"
+    assert stuck["oldest_overdue"][0] == {"party": "Chetan Co", "lr_number": stuck["oldest_overdue"][0]["lr_number"], "balance": "500.00", "days_overdue": 90}
+    assert stuck["near_limit"] == [{"party": "Beta Co", "outstanding": "700.00", "credit_limit": "800.00", "used_pct": 88}]
     assert stuck["late_payers"] == [{"party": "Slow Payer", "lrs_paid": 2, "lrs_paid_late": 2, "average_days_late": 55}]
 
 

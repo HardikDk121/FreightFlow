@@ -5,8 +5,10 @@ import '../../api/api_client.dart';
 import '../../format.dart';
 import '../../state/session.dart';
 import '../../theme/app_theme.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
 import '../../widgets/loader.dart';
+import '../../widgets/phone_field.dart';
 import '../delivery/delivery_screens.dart';
 import '../tasks/tasks_screen.dart';
 
@@ -393,14 +395,15 @@ class _BranchFormState extends State<_BranchForm> with Submitter {
         submitLabel: 'Save',
         onSubmit: () => submit(_save),
         children: [
-          AppTextField(label: 'Name', controller: _name, mandatory: true, minLength: 2, capitalization: TextCapitalization.words),
-          AppTextField(label: 'Address', controller: _address, lines: 2, capitalization: TextCapitalization.words),
-          AppTextField(label: 'Phone', controller: _phone, keyboardType: TextInputType.phone),
+          AppTextField(label: 'Name', controller: _name, mandatory: true, capitalization: TextCapitalization.words, check: businessName),
+          AppTextField(label: 'Address', controller: _address, lines: 2, capitalization: TextCapitalization.words, check: address),
+          PhoneField(controller: _phone),
           AppTextField(
             label: 'Delivers to these cities',
             controller: _cities,
             capitalization: TextCapitalization.characters,
             helper: 'Separated by commas, e.g. RAIPUR, DHAMTARI. A city belongs to one branch.',
+            check: cityList,
           ),
           if (widget.branch != null) SwitchField(label: 'Open', value: _active, onChanged: (v) => setState(() => _active = v)),
         ],

@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../../api/api_client.dart';
 import '../../theme/app_theme.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
+import '../../widgets/phone_field.dart';
 import 'resource.dart';
 
 /// Add ([row] is null) or edit one row of a resource. Pops with `true` after a save.
@@ -70,7 +72,7 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> with Submitter 
                 for (final item in _texts[f.key]!.text.split(','))
                   if (item.trim().isNotEmpty) item.trim(),
               ],
-            FieldKind.decimal => double.tryParse(_texts[f.key]!.text.trim()),
+            FieldKind.decimal => number(_texts[f.key]!.text),
             FieldKind.text => _texts[f.key]!.text.trim().isEmpty ? null : _texts[f.key]!.text.trim(),
           },
       };
@@ -113,6 +115,8 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> with Submitter 
         if (f.kind == FieldKind.date && f.mandatory && _dates[f.key] == null) f.label,
     ];
     if (missing.isNotEmpty) throw ApiException(0, 'Choose a date for: ${missing.join(', ')}.');
+    final across = widget.resource.crossCheck?.call({for (final e in _texts.entries) e.key: e.value.text});
+    if (across != null) throw ApiException(0, across);
     final api = context.read<ApiClient>();
     final row = widget.row;
     if (row == null) {
@@ -184,6 +188,7 @@ class _ResourceFormScreenState extends State<ResourceFormScreen> with Submitter 
             helper: f.helper,
             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
           ),
+        FieldKind.text when f.phone => PhoneField(controller: _texts[f.key]!, label: f.label, mandatory: f.mandatory),
         FieldKind.text || FieldKind.list => AppTextField(
             label: f.label,
             controller: _texts[f.key]!,

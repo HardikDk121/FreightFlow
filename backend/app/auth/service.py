@@ -20,6 +20,7 @@ from app.security import (
     utcnow,
     verify_password,
 )
+from app.validators import normalize_phone as phone_number
 
 # Verified against when the login is unknown, so both failure paths cost one hash.
 _DUMMY_HASH = hash_password("freightflow-timing-equaliser")
@@ -89,6 +90,17 @@ def register(session: Session, data: RegisterRequest) -> TokenPair:
     return issue_tokens(session, user)
 
 
+def normalize_login(login: str) -> str:
+    """An email as typed; a phone number in its stored form, however it was typed."""
+    login = login.strip()
+    if "@" in login:
+        return login
+    try:
+        return phone_number(login)
+    except ValueError:
+        return login
+
+
 # Wrong passwords allowed before sign-in is paused, per account and per network address.
 MAX_FAILURES_PER_LOGIN = 5
 MAX_FAILURES_PER_IP = 30
@@ -123,7 +135,7 @@ def login(session: Session, login_id: str, password: str, ip: str) -> TokenPair:
     # The caller's company is unknown here, so this one lookup goes through a
     # SECURITY DEFINER function that returns ids only.
     row = session.execute(
-        text("SELECT id, company_id FROM auth_user_by_login(:login)"), {"login": login_id.strip()}
+        text("SELECT id, company_id FROM auth_user_by_login(:login)"), {"login": normalize_login(login_id)}
     ).first()
     if row is None:
         verify_password(_DUMMY_HASH, password)

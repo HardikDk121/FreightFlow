@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/api_client.dart';
+import '../../validation.dart';
 import '../../widgets/common.dart';
 import 'auth_scaffold.dart';
 
@@ -20,6 +21,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with Submit
   late final _login = TextEditingController(text: widget.login);
   final _code = TextEditingController();
   final _password = TextEditingController();
+  final _confirm = TextEditingController();
   bool _codeSent = false;
 
   @override
@@ -27,6 +29,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with Submit
     _login.dispose();
     _code.dispose();
     _password.dispose();
+    _confirm.dispose();
     super.dispose();
   }
 
@@ -89,11 +92,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> with Submit
                       label: 'New password',
                       controller: _password,
                       mandatory: true,
-                      minLength: 8,
-                      hint: 'Create a strong password',
-                      helper: 'Use at least 8 characters.',
+                      hint: 'A phrase of a few words works well',
+                      helper: 'At least $minPassword characters. Spaces and any language are fine.',
                       obscure: true,
                       autofillHints: const [AutofillHints.newPassword],
+                      check: newPassword,
+                    ),
+                    AppTextField(
+                      label: 'Confirm new password',
+                      controller: _confirm,
+                      mandatory: true,
+                      obscure: true,
+                      autofillHints: const [AutofillHints.newPassword],
+                      check: (v) => v == _password.text ? null : 'The passwords do not match.',
                     ),
                   ],
                   const SizedBox(height: 4),

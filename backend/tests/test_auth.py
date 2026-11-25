@@ -21,7 +21,7 @@ def test_bad_credentials_give_the_same_error(client, admin):
 def test_duplicate_email_is_rejected_across_companies(client, admin):
     again = client.post(
         "/auth/register",
-        json={"company_name": "Other", "name": "B", "email": "Admin@shree.example", "password": "correct-horse"},
+        json={"company_name": "Other", "name": "Bina", "email": "Admin@shree.example", "password": "correct-horse"},
     )
     assert again.status_code == 409
     # the failed registration left no company behind

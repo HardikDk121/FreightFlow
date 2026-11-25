@@ -159,7 +159,7 @@ def test_a_deposit_without_its_number_is_matched_only_when_unambiguous(client, a
     h = bearer(admin)
     collector = add_staff(client, admin, "ramesh@shree.example", "collector")
     clerk = add_staff(client, admin, "suresh@shree.example", "register_clerk")
-    for name in ("A", "B"):
+    for name in ("Anil Traders", "Bharat Traders"):
         _visit(client, collector, _receipt(client, clerk, _lr(client, h, st_charges="500", consignee_name=name)), "paid", method="cash", amount="500")
     client.post("/handovers", json={"from_user_id": _user_id(client, collector), "counted_cash": "1000"}, headers=bearer(clerk))
     client.post("/deposits", json={"cash_amount": "1000"}, headers=bearer(clerk))

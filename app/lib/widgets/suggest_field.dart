@@ -23,6 +23,7 @@ class SuggestField extends StatefulWidget {
     required this.onChanged,
     this.mandatory = false,
     this.highlighted = false,
+    this.check,
   });
 
   final String label;
@@ -34,6 +35,9 @@ class SuggestField extends StatefulWidget {
   final String Function(Map<String, dynamic> row) subtitleOf;
   final ValueChanged<Map<String, dynamic>> onPicked;
   final ValueChanged<String> onChanged;
+
+  /// Extra validation for a non-empty value, as on [AppTextField].
+  final String? Function(String value)? check;
 
   @override
   State<SuggestField> createState() => _SuggestFieldState();
@@ -107,6 +111,7 @@ class _SuggestFieldState extends State<SuggestField> {
             mandatory: widget.mandatory,
             highlighted: widget.highlighted,
             capitalization: TextCapitalization.characters,
+            check: widget.check,
             onChanged: _typed,
           ),
           if (_rows.isNotEmpty)

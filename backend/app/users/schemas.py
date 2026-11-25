@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, model_validator
 
 from app.models import Role, User
 from app.permissions import P, effective
-from app.validators import Name, Password, PatchModel, Phone
+from app.validators import NewPassword, PatchModel, PersonName, Phone
 
 Language = Literal["en", "hi", "gu"]
 
@@ -43,14 +43,14 @@ class UserRead(BaseModel):
 class ProfileUpdate(PatchModel):
     not_nullable = frozenset({"name", "language"})
 
-    name: Name | None = None
+    name: PersonName | None = None
     phone: Phone | None = None
     language: Language | None = None
 
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: Password
+    new_password: NewPassword
 
 
 class InviteRequest(BaseModel):
@@ -81,4 +81,4 @@ class UserAdminUpdate(PatchModel):
 
 
 class AdminPasswordReset(BaseModel):
-    new_password: Password
+    new_password: NewPassword

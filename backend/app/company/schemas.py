@@ -3,13 +3,15 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, StringConstraints
 
-from app.validators import Gstin, Name, PatchModel, Phone
+from app.validators import BusinessName, Gstin, PatchModel, Phone
 
 
 def _address(value: str) -> str:
     lines = [line.strip() for line in value.splitlines() if line.strip()]
     if not lines or len(lines) > 3 or any(len(line) > 48 for line in lines):
         raise ValueError("Address must be 1 to 3 lines of up to 48 characters. It is printed on the LR.")
+    if not any(ch.isalpha() for ch in value):
+        raise ValueError("An address must contain letters, not only numbers or symbols.")
     return "\n".join(lines)
 
 
@@ -42,7 +44,7 @@ class CompanyRead(BaseModel):
 class CompanyUpdate(PatchModel):
     not_nullable = frozenset({"name"})
 
-    name: Name | None = None
+    name: BusinessName | None = None
     tagline: Tagline | None = None
     address: Address | None = None
     gstin: Gstin | None = None

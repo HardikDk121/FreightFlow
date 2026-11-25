@@ -14,7 +14,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from app import audit
-from app.auth.service import revoke_all_tokens
+from app.auth.service import normalize_login, revoke_all_tokens
 from app.config import get_settings
 from app.db import SessionLocal, set_tenant
 from app.errors import AppError
@@ -50,7 +50,7 @@ def throttle(session: Session, limits: dict[str, int]) -> None:
 
 def _find_user(session: Session, login: str) -> User | None:
     """The active user with this email or phone, with the transaction scoped to their company."""
-    row = session.execute(text("SELECT id, company_id FROM auth_user_by_login(:login)"), {"login": login.strip()}).first()
+    row = session.execute(text("SELECT id, company_id FROM auth_user_by_login(:login)"), {"login": normalize_login(login)}).first()
     if row is None:
         return None
     set_tenant(session, row.company_id)

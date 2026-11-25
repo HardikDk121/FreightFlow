@@ -822,7 +822,7 @@ class BusyButton extends StatelessWidget {
 /// Scaffold for a [Submitter] screen: a title with a line saying what it is for, scrolling fields,
 /// and a pinned area holding the error (if any), an optional [footer] such as a running total,
 /// an optional secondary action, and the one primary button.
-class FormPage extends StatelessWidget {
+class FormPage extends StatefulWidget {
   const FormPage({
     super.key,
     required this.title,
@@ -859,19 +859,45 @@ class FormPage extends StatelessWidget {
   final VoidCallback? onSecondary;
 
   @override
+  State<FormPage> createState() => _FormPageState();
+}
+
+class _FormPageState extends State<FormPage> {
+  /// The error the person has since edited the form to fix: hidden until the next submit.
+  String? _dismissed;
+
+  @override
   Widget build(BuildContext context) {
-    final primary = BusyButton(label: submitLabel, onPressed: onSubmit, busy: busy);
-    final fields = [if (subtitle != null) PageIntro(subtitle!), ...children];
+    final w = widget;
+    final submit = w.onSubmit;
+    final primary = BusyButton(
+      label: w.submitLabel,
+      busy: w.busy,
+      onPressed: submit == null
+          ? null
+          : () {
+              setState(() => _dismissed = null);
+              submit();
+            },
+    );
+    final fields = [if (w.subtitle != null) PageIntro(w.subtitle!), ...w.children];
+    final error = w.error != null && w.error != _dismissed ? w.error : null;
     return Scaffold(
-      appBar: hero == null ? AppBar(title: Text(title)) : null,
+      appBar: w.hero == null ? AppBar(title: Text(w.title)) : null,
       body: Form(
-        key: formKey,
-        child: hero == null
+        key: w.formKey,
+        // Field errors update as the person types, once they have touched a field; the summary
+        // banner goes as soon as they start fixing things.
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        onChanged: () {
+          if (w.error != null && _dismissed != w.error) setState(() => _dismissed = w.error);
+        },
+        child: w.hero == null
             ? ListView(padding: const EdgeInsets.fromLTRB(20, 0, 20, 24), children: fields)
             : ListView(
                 padding: const EdgeInsets.only(bottom: 24),
                 children: [
-                  hero!,
+                  w.hero!,
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: fields),
@@ -882,8 +908,8 @@ class FormPage extends StatelessWidget {
       bottomNavigationBar: BottomBar(
         children: [
           if (error != null) ...[ErrorBanner(error!), const SizedBox(height: 12)],
-          if (footer != null) ...[footer!, const SizedBox(height: 12)],
-          if (secondaryLabel == null)
+          if (w.footer != null) ...[w.footer!, const SizedBox(height: 12)],
+          if (w.secondaryLabel == null)
             primary
           else
             Row(
@@ -891,8 +917,8 @@ class FormPage extends StatelessWidget {
                 Expanded(
                   child: OutlinedButton(
                     style: OutlinedButton.styleFrom(minimumSize: const Size(0, 54)),
-                    onPressed: busy ? null : onSecondary,
-                    child: Text(secondaryLabel!, overflow: TextOverflow.ellipsis),
+                    onPressed: w.busy ? null : w.onSecondary,
+                    child: Text(w.secondaryLabel!, overflow: TextOverflow.ellipsis),
                   ),
                 ),
                 const SizedBox(width: 12),

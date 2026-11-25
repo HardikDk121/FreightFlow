@@ -104,19 +104,83 @@ class RequestGuard:
         await self.app(scope, inner_receive, with_headers)
 
 
+# Plain words for each kind of schema error, so no regex, type name or schema detail reaches a person.
+def _friendly(item: dict) -> str:
+    kind, ctx = item.get("type", ""), item.get("ctx") or {}
+    if kind == "value_error":
+        msg = str(item.get("msg", "")).removeprefix("Value error, ")
+        return "Enter a valid email address." if msg.startswith("value is not a valid email address") else msg
+    messages = {
+        "missing": "This is required.",
+        "string_too_short": f"Enter at least {ctx.get('min_length', 1)} characters.",
+        "string_too_long": f"Use at most {ctx.get('max_length')} characters.",
+        "string_pattern_mismatch": "This is not in the right format.",
+        "string_type": "Enter text here.",
+        "greater_than": f"Must be more than {ctx.get('gt')}.",
+        "greater_than_equal": f"Must be {ctx.get('ge')} or more.",
+        "less_than": f"Must be less than {ctx.get('lt')}.",
+        "less_than_equal": f"Must be {ctx.get('le')} or less.",
+        "decimal_max_places": f"Use at most {ctx.get('decimal_places')} decimal places.",
+        "decimal_max_digits": "This number is too large.",
+        "decimal_parsing": "Enter a number.",
+        "decimal_type": "Enter a number.",
+        "float_parsing": "Enter a number.",
+        "float_type": "Enter a number.",
+        "finite_number": "Enter a number.",
+        "int_parsing": "Enter a whole number.",
+        "int_from_float": "Enter a whole number.",
+        "int_type": "Enter a whole number.",
+        "bool_parsing": "Choose yes or no.",
+        "bool_type": "Choose yes or no.",
+        "literal_error": "Choose one of the listed options.",
+        "enum": "Choose one of the listed options.",
+        "date_parsing": "Enter a valid date.",
+        "date_from_datetime_parsing": "Enter a valid date.",
+        "date_type": "Enter a valid date.",
+        "datetime_parsing": "Enter a valid date and time.",
+        "datetime_from_date_parsing": "Enter a valid date and time.",
+        "timezone_aware": "Enter a date and time with its time zone.",
+        "uuid_parsing": "That record could not be found.",
+        "uuid_type": "That record could not be found.",
+        "too_short": f"Add at least {ctx.get('min_length', 1)}.",
+        "too_long": f"Use at most {ctx.get('max_length')}.",
+        "list_type": "Choose from the list.",
+        "dict_type": "The request could not be read.",
+        "model_type": "The request could not be read.",
+        "model_attributes_type": "The request could not be read.",
+        "json_invalid": "The request could not be read.",
+        "extra_forbidden": "This field is not allowed here.",
+    }
+    if kind in messages:
+        return messages[kind]
+    if "email" in str(item.get("msg", "")).lower():
+        return "Enter a valid email address."
+    return "This value is not valid."
+
+
 def _field(loc: tuple | list) -> str:
-    parts = [str(p) for p in loc if p not in ("body", "query", "path", "header")]
-    return ".".join(parts) or "request"
+    """A field's path as a person reads it: ("body", "payer_phone") -> "Payer phone"."""
+    parts = [str(p) for p in loc if p not in ("body", "query", "path", "header") and not isinstance(p, int)]
+    parts = [p for p in parts if not p.startswith(("function-", "constrained-", "json-or-python", "list[", "nullable"))]
+    if not parts:
+        return "request"
+    return parts[-1].replace("_", " ").strip().capitalize()
 
 
 async def validation_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
-    """422 in the app's error shape, with each field's problem, plus FastAPI's `detail` list for older clients."""
+    """422 in the app's error shape: each field's problem in plain words. FastAPI's `detail` list stays
+    for older clients, with the same plain messages and no input echo or schema context."""
     fields: dict[str, str] = {}
+    detail = []
     for item in exc.errors():
-        fields.setdefault(_field(item.get("loc", ())), str(item.get("msg", "Invalid value")).removeprefix("Value error, "))
-    first_field, first_message = next(iter(fields.items()), ("request", "Invalid request."))
-    message = first_message if first_field == "request" else f"{first_field}: {first_message}"
-    detail = [{"loc": list(i.get("loc", ())), "msg": str(i.get("msg", "")), "type": i.get("type", "")} for i in exc.errors()]
+        message = _friendly(item)
+        loc = [str(p) for p in item.get("loc", ())]
+        key = ".".join(p for p in loc if p not in ("body", "query", "path", "header")) or "request"
+        fields.setdefault(key, message)
+        detail.append({"loc": loc, "msg": message, "type": item.get("type", "")})
+    first_key, first_message = next(iter(fields.items()), ("request", "Invalid request."))
+    label = _field(first_key.split("."))
+    message = first_message if label == "request" else f"{label}: {first_message}"
     body = {"error": {"code": "invalid", "message": message, "fields": fields}, "detail": detail}
     return JSONResponse(status_code=422, content=body)
 

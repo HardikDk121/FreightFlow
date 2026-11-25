@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections.abc import Iterator
 
@@ -27,6 +28,18 @@ def set_branches(session: Session, branch_ids: list[uuid.UUID]) -> None:
 
 
 def get_session() -> Iterator[Session]:
-    """One transaction per request: commit on success, roll back on any exception."""
-    with SessionLocal() as session, session.begin():
-        yield session
+    """One transaction per request: commit on success, roll back on any exception. Work registered
+    with `after_commit` (messages to customers) runs only once the commit has succeeded."""
+    with SessionLocal() as session:
+        with session.begin():
+            yield session
+        for hook in session.info.pop("after_commit", []):
+            try:
+                hook()
+            except Exception:  # a failed message must not fail a request that is already saved
+                logging.getLogger("freightflow.db").exception("After-commit step failed")
+
+
+def after_commit(session: Session, hook) -> None:
+    """Run `hook` after this request's transaction commits; never if it rolls back."""
+    session.info.setdefault("after_commit", []).append(hook)
