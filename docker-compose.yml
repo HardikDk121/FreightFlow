@@ -19,6 +19,9 @@ services:
       db:
         condition: service_healthy
     environment:
+      FF_ENV: ${FF_ENV:-production}
+      FF_HTTPS: ${FF_HTTPS:-true}
+      FF_FORWARDED_ALLOW_IPS: ${FF_FORWARDED_ALLOW_IPS:-*}
       FF_DATABASE_URL: postgresql+psycopg://freightflow_app:${FF_APP_PASSWORD}@db/freightflow
       FF_MIGRATION_DATABASE_URL: postgresql+psycopg://freightflow_owner:${FF_OWNER_PASSWORD}@db/freightflow
       FF_JWT_SECRET: ${FF_JWT_SECRET}
@@ -45,6 +48,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+
 volumes:
   pgdata:
   caddy_data:
